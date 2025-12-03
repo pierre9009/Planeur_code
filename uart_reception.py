@@ -9,20 +9,14 @@ from ahrs.common.orientation import acc2q
 
 def parse_packet(line):
     """
-    Attend une ligne type:
-    D,roll,pitch,gx,gy,gz,ax,ay,az
-
-    Retourne un dict ou None si invalide.
+    D,roll,pitch,gx,gy,gz,ax,ay,az,mx,my,mz
     """
     try:
         if not line.startswith("D,"):
             return None
 
         parts = line.strip().split(",")
-        # "D" + 8 valeurs = 9 elements
-        if len(parts) != 9:
-            # debug optionnel:
-            # print("Ligne ignoree (len=", len(parts), "):", parts)
+        if len(parts) != 12:  # D + 11 valeurs
             return None
 
         return {
@@ -34,6 +28,9 @@ def parse_packet(line):
             "ax":         float(parts[6]),
             "ay":         float(parts[7]),
             "az":         float(parts[8]),
+            "mx":         float(parts[9]),
+            "my":         float(parts[10]),
+            "mz":         float(parts[11]),
         }
     except ValueError:
         return None
@@ -74,7 +71,25 @@ def main():
     time.sleep(0.2)
 
     sample_freq = 50.0
-    ekf = EKF(frequency=sample_freq, frame="ENU")
+
+    sigma_g  = 1e-3          # rad/s
+    sigma_a  = 0.05          # m/s^2
+    sigma_m  = 0.5e-6        # Tesla
+
+    # bruit de processus sur le quaternion (ordre de grandeur)
+    Q = (sigma_g**2) * np.eye(4)
+
+    # bruit de mesure sur acc + mag
+    R_acc = (sigma_a**2) * np.eye(3)
+    R_mag = (sigma_m**2) * np.eye(3)
+    
+    ekf = EKF(
+        frequency=sample_freq,
+        frame="ENU",
+        Q=Q,
+        R_acc=R_acc,
+        R_mag=R_mag,
+    )
 
     q = None
     print("Lecture UART + EKF en cours...")
@@ -98,15 +113,16 @@ def main():
             gyr = np.array([gx_rad, gy_rad, gz_rad], dtype=float)
 
             acc = np.array([data["ax"], data["ay"], data["az"]], dtype=float)
+            mag = np.array([data["mx"], data["my"], data["mz"]], dtype=float)
 
             if q is None:
-                q = acc2q(acc)
+                q = acc2q(acc)   # init simple
                 q = q / np.linalg.norm(q)
                 print("Quaternion initial:", q)
                 continue
 
-            # mise a jour EKF (sans mag pour l'instant)
-            q = ekf.update(q, gyr=gyr, acc=acc)
+            # EKF 9 axes
+            q = ekf.update(q, gyr=gyr, acc=acc, mag=mag)
             # si erreur, essayer: q = ekf.update(gyr=gyr, acc=acc, q=q)
 
             roll_ekf, pitch_ekf, yaw_ekf = quat_to_euler(q)
