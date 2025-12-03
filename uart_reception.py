@@ -1,7 +1,6 @@
 import serial
 import time
 import math
-
 import numpy as np
 from ahrs.filters import EKF
 from ahrs.common.orientation import acc2q
@@ -41,7 +40,7 @@ def quat_to_euler(q):
 
     # roll (x)
     sinr_cosp = 2.0 * (qw * qx + qy * qz)
-    cosr_cosp = 1.0 - 2.0 * (qx * qx + qy * qy)
+    cosr_cosp = 1.0 - 2.0 * (qx * qx + qy * qz)
     roll = math.atan2(sinr_cosp, cosr_cosp)
 
     # pitch (y)
@@ -72,23 +71,24 @@ def main():
 
     sample_freq = 50.0
 
-    sigma_g  = 1e-3          # rad/s
-    sigma_a  = 0.05          # m/s^2
-    sigma_m  = 0.5e-6        # Tesla
+    # bruits (ordres de grandeur)
+    sigma_g  = 1e-3      # rad/s
+    sigma_a  = 0.05      # m/s^2
+    sigma_m  = 0.5       # uT (si tes mags sont en uT)
 
-    # bruit de processus sur le quaternion (ordre de grandeur)
     Q = (sigma_g**2) * np.eye(4)
 
-    # bruit de mesure sur acc + mag
-    R_acc = (sigma_a**2) * np.eye(3)
-    R_mag = (sigma_m**2) * np.eye(3)
-    
+    # R fusionné accel + mag (6x6) si tu veux t en servir plus tard
+    R = np.block([
+        [(sigma_a**2) * np.eye(3),           np.zeros((3, 3))],
+        [np.zeros((3, 3)),        (sigma_m**2) * np.eye(3)],
+    ])
+
     ekf = EKF(
         frequency=sample_freq,
-        frame="ENU",
-        Q=Q,
-        R_acc=R_acc,
-        R_mag=R_mag,
+        frame="ENU",   # garde ENU si tu es cohérent partout
+        Q=Q,           # ces kwargs seront stockés dans ekf,
+        R=R,           # certaines versions les utilisent directement
     )
 
     q = None
@@ -116,14 +116,14 @@ def main():
             mag = np.array([data["mx"], data["my"], data["mz"]], dtype=float)
 
             if q is None:
-                q = acc2q(acc)   # init simple
+                q = acc2q(acc)
                 q = q / np.linalg.norm(q)
                 print("Quaternion initial:", q)
                 continue
 
-            # EKF 9 axes
+            # EKF 9 axes (gyro + accel + mag)
+            # appel en mots-clés: plus robuste à d'éventuels changements de signature
             q = ekf.update(q, gyr=gyr, acc=acc, mag=mag)
-            # si erreur, essayer: q = ekf.update(gyr=gyr, acc=acc, q=q)
 
             roll_ekf, pitch_ekf, yaw_ekf = quat_to_euler(q)
 
