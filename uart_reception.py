@@ -19,7 +19,10 @@ def parse_packet(line):
             return None
 
         parts = line.strip().split(",")
-        if len(parts) != 9 + 1:  # "D" + 9 valeurs
+        # "D" + 8 valeurs = 9 elements
+        if len(parts) != 9:
+            # debug optionnel:
+            # print("Ligne ignoree (len=", len(parts), "):", parts)
             return None
 
         return {
@@ -37,13 +40,6 @@ def parse_packet(line):
 
 
 def quat_to_euler(q):
-    """
-    Convertit un quaternion [w, x, y, z] en angles Euler (rad)
-    Convention type avion:
-      roll  rotation autour de X
-      pitch rotation autour de Y
-      yaw   rotation autour de Z
-    """
     qw, qx, qy, qz = q
 
     # roll (x)
@@ -69,7 +65,6 @@ def quat_to_euler(q):
 
 
 def main():
-    # UART du Pi, adapte si besoin
     ser = serial.Serial(
         port="/dev/serial0",
         baudrate=230400,
@@ -78,10 +73,7 @@ def main():
 
     time.sleep(0.2)
 
-    # Fréquence d’échantillonnage envoyée par l’Arduino
     sample_freq = 50.0
-
-    # EKF de la lib "ahrs"
     ekf = EKF(frequency=sample_freq, frame="ENU")
 
     q = None
@@ -100,37 +92,32 @@ def main():
             roll_comp  = data["roll_comp"]
             pitch_comp = data["pitch_comp"]
 
-            # Gyro en deg/s -> rad/s pour l’EKF
             gx_rad = data["gx_deg"] * math.pi / 180.0
             gy_rad = data["gy_deg"] * math.pi / 180.0
             gz_rad = data["gz_deg"] * math.pi / 180.0
             gyr = np.array([gx_rad, gy_rad, gz_rad], dtype=float)
 
-            # Accélération en m/s^2
             acc = np.array([data["ax"], data["ay"], data["az"]], dtype=float)
 
-            # Initialisation du quaternion avec l’accéléro seul
             if q is None:
-                q = acc2q(acc)  # quaternion initial approximatif
-                # Optionnel: normalisation explicite
+                q = acc2q(acc)
                 q = q / np.linalg.norm(q)
                 print("Quaternion initial:", q)
                 continue
 
-            # Mise à jour EKF (sans mag pour l’instant)
-            q = ekf.update(q, gyr, acc)
+            # mise a jour EKF (sans mag pour l'instant)
+            q = ekf.update(q, gyr=gyr, acc=acc)
+            # si erreur, essayer: q = ekf.update(gyr=gyr, acc=acc, q=q)
 
-            # Conversion en Euler
             roll_ekf, pitch_ekf, yaw_ekf = quat_to_euler(q)
 
             roll_ekf_deg  = math.degrees(roll_ekf)
             pitch_ekf_deg = math.degrees(pitch_ekf)
             yaw_ekf_deg   = math.degrees(yaw_ekf)
 
-            # Affichage comparatif
             print(
-                f"COMP   R={roll_comp:7.2f}  P={pitch_comp:7.2f}  |  "
-                f"EKF   R={roll_ekf_deg:7.2f}  P={pitch_ekf_deg:7.2f}  Y={yaw_ekf_deg:7.2f}"
+                f"COMP R={roll_comp:7.2f} P={pitch_comp:7.2f} | "
+                f"EKF R={roll_ekf_deg:7.2f} P={pitch_ekf_deg:7.2f} Y={yaw_ekf_deg:7.2f}"
             )
 
         except KeyboardInterrupt:
