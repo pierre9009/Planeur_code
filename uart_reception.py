@@ -9,8 +9,7 @@ from ahrs.common.orientation import acc2q
 
 def parse_packet(line: str):
     """
-    Format exact envoyé par l'Arduino:
-
+    Trame Arduino:
     D,roll,pitch,gx,gy,gz,ax,ay,az,mx,my,mz
     """
     try:
@@ -18,7 +17,9 @@ def parse_packet(line: str):
             return None
 
         parts = line.strip().split(",")
-        if len(parts) != 12:  # "D" + 11 valeurs
+        if len(parts) != 12:
+            # décommente pour debug si besoin:
+            # print("Ligne ignoree len=", len(parts), ":", parts)
             return None
 
         return {
@@ -39,12 +40,12 @@ def parse_packet(line: str):
 
 
 def quat_to_euler(q):
-    """Quaternion [w,x,y,z] -> (roll, pitch, yaw) en radians."""
+    """Quaternion [w,x,y,z] -> (roll, pitch, yaw) en rad."""
     qw, qx, qy, qz = q
 
     # roll (x)
     sinr_cosp = 2.0 * (qw * qx + qy * qz)
-    cosr_cosp = 1.0 - 2.0 * (qx * qx + qy * qy)
+    cosr_cosp = 1.0 - 2.0 * (qx * qx + qy * qz)
     roll = math.atan2(sinr_cosp, cosr_cosp)
 
     # pitch (y)
@@ -65,26 +66,30 @@ def quat_to_euler(q):
 
 
 def main():
-    # Port série vers l'Arduino
     ser = serial.Serial(
-        port="/dev/serial0",   # adapte si besoin (/dev/ttyAMA0, etc.)
+        port="/dev/serial0",  # adapte si besoin
         baudrate=230400,
         timeout=1.0,
     )
 
     time.sleep(0.2)
+    print("Port serie ouvert, test de lecture brute...")
 
-    sample_freq = 50.0  # Hz (comme ton Arduino)
+    # petite lecture brute pour vérifier que ça arrive bien
+    for _ in range(5):
+        raw = ser.readline().decode(errors="ignore").strip()
+        if raw:
+            print("RAW:", repr(raw))
 
-    # Bruits (ordres de grandeur basés sur le BMX160)
-    sigma_g  = 1e-3      # rad/s   (gyro)
-    sigma_a  = 0.05      # m/s^2   (accel, un peu gonflé pour vibrations)
-    sigma_m  = 0.5       # uT      (mag, en µT si le BMX renvoie des µT)
+    sample_freq = 50.0
 
-    # Q : bruit de processus sur le quaternion (très simplifié)
+    # bruits (ordres de grandeur BMX160)
+    sigma_g  = 1e-3      # rad/s
+    sigma_a  = 0.05      # m/s^2
+    sigma_m  = 0.5       # uT
+
     Q = (sigma_g**2) * np.eye(4)
 
-    # R : bruit de mesure sur [acc; mag] concaténés (6x6)
     R_acc = (sigma_a**2) * np.eye(3)
     R_mag = (sigma_m**2) * np.eye(3)
     R = np.block([
@@ -92,35 +97,32 @@ def main():
         [np.zeros((3, 3)),  R_mag],
     ])
 
-    # Création de l'EKF
     ekf = EKF(
         frequency=sample_freq,
-        frame="ENU",   # cohérent si tu pars sur cette convention
+        frame="ENU",
     )
 
-    # Si l'objet expose Q/R, on les remplace
-    if hasattr(ekf, "Q"):
-        try:
-            if ekf.Q.shape == Q.shape:
-                ekf.Q = Q
-                print("Q custom applique a l'EKF")
-            else:
-                print("Taille ekf.Q inattendue, Q custom ignore")
-        except Exception as e:
-            print("Impossible de modifier ekf.Q:", e)
+    # On essaie gentiment de mettre Q et R si la shape colle
+    try:
+        if hasattr(ekf, "Q") and ekf.Q.shape == Q.shape:
+            ekf.Q = Q
+            print("Q custom applique")
+        else:
+            print("Q custom ignore (shape differente)")
+    except Exception as e:
+        print("Impossible de régler Q:", e)
 
-    if hasattr(ekf, "R"):
-        try:
-            if ekf.R.shape == R.shape:
-                ekf.R = R
-                print("R custom applique a l'EKF")
-            else:
-                print("Taille ekf.R inattendue, R custom ignore")
-        except Exception as e:
-            print("Impossible de modifier ekf.R:", e)
+    try:
+        if hasattr(ekf, "R") and ekf.R.shape == R.shape:
+            ekf.R = R
+            print("R custom applique")
+        else:
+            print("R custom ignore (shape differente)")
+    except Exception as e:
+        print("Impossible de régler R:", e)
 
     q = None
-    print("Lecture UART + EKF 9 axes en cours...")
+    print("Lecture UART + EKF en cours...")
 
     while True:
         try:
@@ -135,37 +137,32 @@ def main():
             roll_comp  = data["roll_comp"]
             pitch_comp = data["pitch_comp"]
 
-            # Gyro deg/s -> rad/s
             gx_rad = data["gx_deg"] * math.pi / 180.0
             gy_rad = data["gy_deg"] * math.pi / 180.0
             gz_rad = data["gz_deg"] * math.pi / 180.0
             gyr = np.array([gx_rad, gy_rad, gz_rad], dtype=float)
 
-            # Accel en m/s²
             acc = np.array([data["ax"], data["ay"], data["az"]], dtype=float)
-
-            # Mag en µT (on les laisse comme ça)
             mag = np.array([data["mx"], data["my"], data["mz"]], dtype=float)
 
-            # Init du quaternion avec l'acceléromètre
             if q is None:
                 q = acc2q(acc)
                 q = q / np.linalg.norm(q)
                 print("Quaternion initial:", q)
                 continue
 
-            # EKF 9 axes: gyro + accel + mag
-            # Signature doc: update(q, gyr, acc). Le mag est pris via z/attribut.
-            # Sur les versions récentes, mag est accepté comme 4e argument:
+            # suivant la version de ahrs, mag peut être pris de 2 façons
             try:
+                # signature possible: update(q, gyr, acc, mag)
                 q = ekf.update(q, gyr, acc, mag)
             except TypeError:
-                # fallback si la signature ne prend que gyr, acc
+                # fallback: la version doc officielle prend juste gyr, acc,
+                # et utilise self.mag / self.z en interne
                 ekf.mag = mag
                 q = ekf.update(q, gyr, acc)
 
-            # Quaternion -> angles
             roll_ekf, pitch_ekf, yaw_ekf = quat_to_euler(q)
+
             roll_ekf_deg  = math.degrees(roll_ekf)
             pitch_ekf_deg = math.degrees(pitch_ekf)
             yaw_ekf_deg   = math.degrees(yaw_ekf)
