@@ -18,8 +18,6 @@ def parse_packet(line: str):
 
         parts = line.strip().split(",")
         if len(parts) != 12:
-            # décommente pour debug si besoin:
-            # print("Ligne ignoree len=", len(parts), ":", parts)
             return None
 
         return {
@@ -67,7 +65,7 @@ def quat_to_euler(q):
 
 def main():
     ser = serial.Serial(
-        port="/dev/serial0",  # adapte si besoin
+        port="/dev/serial0",   # adapte si besoin (/dev/ttyAMA0 etc.)
         baudrate=230400,
         timeout=1.0,
     )
@@ -75,54 +73,25 @@ def main():
     time.sleep(0.2)
     print("Port serie ouvert, test de lecture brute...")
 
-    # petite lecture brute pour vérifier que ça arrive bien
-    for _ in range(5):
+    # petit apercu des lignes reçues
+    for _ in range(3):
         raw = ser.readline().decode(errors="ignore").strip()
         if raw:
             print("RAW:", repr(raw))
 
     sample_freq = 50.0
 
-    # bruits (ordres de grandeur BMX160)
-    sigma_g  = 1e-3      # rad/s
-    sigma_a  = 0.05      # m/s^2
-    sigma_m  = 0.5       # uT
-
-    Q = (sigma_g**2) * np.eye(4)
-
-    R_acc = (sigma_a**2) * np.eye(3)
-    R_mag = (sigma_m**2) * np.eye(3)
-    R = np.block([
-        [R_acc,             np.zeros((3, 3))],
-        [np.zeros((3, 3)),  R_mag],
-    ])
-
+    # d après la doc ahrs: usage streaming
+    # ekf = EKF()
+    # for t: q = ekf.update(q, gyr[t], acc[t])
+    # on ajoute juste frequency et frame
     ekf = EKF(
         frequency=sample_freq,
         frame="ENU",
     )
 
-    # On essaie gentiment de mettre Q et R si la shape colle
-    try:
-        if hasattr(ekf, "Q") and ekf.Q.shape == Q.shape:
-            ekf.Q = Q
-            print("Q custom applique")
-        else:
-            print("Q custom ignore (shape differente)")
-    except Exception as e:
-        print("Impossible de régler Q:", e)
-
-    try:
-        if hasattr(ekf, "R") and ekf.R.shape == R.shape:
-            ekf.R = R
-            print("R custom applique")
-        else:
-            print("R custom ignore (shape differente)")
-    except Exception as e:
-        print("Impossible de régler R:", e)
-
     q = None
-    print("Lecture UART + EKF en cours...")
+    print("Lecture UART + EKF gyro+acc+mag en cours...")
 
     while True:
         try:
@@ -137,32 +106,36 @@ def main():
             roll_comp  = data["roll_comp"]
             pitch_comp = data["pitch_comp"]
 
+            # gyro deg/s -> rad/s
             gx_rad = data["gx_deg"] * math.pi / 180.0
             gy_rad = data["gy_deg"] * math.pi / 180.0
             gz_rad = data["gz_deg"] * math.pi / 180.0
             gyr = np.array([gx_rad, gy_rad, gz_rad], dtype=float)
 
+            # accel m/s^2
             acc = np.array([data["ax"], data["ay"], data["az"]], dtype=float)
+
+            # mag en uT
             mag = np.array([data["mx"], data["my"], data["mz"]], dtype=float)
 
+            # init quaternion avec l'acceléromètre
             if q is None:
                 q = acc2q(acc)
                 q = q / np.linalg.norm(q)
                 print("Quaternion initial:", q)
                 continue
 
-            # suivant la version de ahrs, mag peut être pris de 2 façons
+            # d après la lib: update(q, gyr, acc)
+            # et dans les versions récentes, mag est supporté comme 4e argument
             try:
-                # signature possible: update(q, gyr, acc, mag)
                 q = ekf.update(q, gyr, acc, mag)
             except TypeError:
-                # fallback: la version doc officielle prend juste gyr, acc,
-                # et utilise self.mag / self.z en interne
+                # si jamais ta version ne prend que 3 args:
+                # on met mag comme état interne et on appelle update(q, gyr, acc)
                 ekf.mag = mag
                 q = ekf.update(q, gyr, acc)
 
             roll_ekf, pitch_ekf, yaw_ekf = quat_to_euler(q)
-
             roll_ekf_deg  = math.degrees(roll_ekf)
             pitch_ekf_deg = math.degrees(pitch_ekf)
             yaw_ekf_deg   = math.degrees(yaw_ekf)
