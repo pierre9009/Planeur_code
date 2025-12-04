@@ -56,12 +56,13 @@ def imu_thread():
     print("Port série ouvert")
 
     sample_freq = 50.0
-    gyro_scale = 1.0
     magnetic_dip_deg = 64.0
 
+    # CORRECTION: Augmenter le gain pour une meilleure réactivité
     fourati = Fourati(
         frequency=sample_freq,
         magnetic_dip=magnetic_dip_deg,
+        gain=0.5,  # Augmenté de 0.1 (défaut) à 0.5
     )
 
     q = None
@@ -83,17 +84,27 @@ def imu_thread():
             if data is None:
                 continue
 
-            # Conversion gyroscope
-            gx_rad = data["gx_deg"] * gyro_scale * math.pi / 180.0
-            gy_rad = data["gy_deg"] * gyro_scale * math.pi / 180.0
-            gz_rad = data["gz_deg"] * gyro_scale * math.pi / 180.0
+            # Conversion gyroscope en rad/s
+            gx_rad = data["gx_deg"] * math.pi / 180.0
+            gy_rad = data["gy_deg"] * math.pi / 180.0
+            gz_rad = data["gz_deg"] * math.pi / 180.0
             gyr = np.array([gx_rad, gy_rad, gz_rad], dtype=float)
 
-            # Accéléromètre
+            # Accéléromètre (déjà en m/s²)
             acc = np.array([data["ax"], data["ay"], data["az"]], dtype=float)
+            
+            # CORRECTION CRITIQUE: Normaliser l'accéléromètre
+            acc_norm = np.linalg.norm(acc)
+            if acc_norm > 0.1:  # Éviter division par zéro
+                acc = acc / acc_norm
 
             # Magnétomètre µT -> mT
             mag = np.array([data["mx"], data["my"], data["mz"]], dtype=float) / 1000.0
+            
+            # CORRECTION CRITIQUE: Normaliser le magnétomètre
+            mag_norm = np.linalg.norm(mag)
+            if mag_norm > 0.001:  # Éviter division par zéro
+                mag = mag / mag_norm
 
             # Initialisation du quaternion
             if q is None:
@@ -110,6 +121,9 @@ def imu_thread():
                 mag=mag,
                 dt=dt,
             )
+
+            # CORRECTION: Normaliser le quaternion après mise à jour
+            q = q / np.linalg.norm(q)
 
             # Conversion en angles d'Euler
             angles = Quaternion(q).to_angles()
@@ -138,6 +152,8 @@ def imu_thread():
 
         except Exception as e:
             print("Erreur IMU thread:", e)
+            import traceback
+            traceback.print_exc()
 
 
 @app.route('/')
