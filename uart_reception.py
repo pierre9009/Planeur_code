@@ -3,15 +3,12 @@ import time
 import math
 import numpy as np
 
-from ahrs.filters import EKF
+from ahrs.filters import Fourati
 from ahrs.common.orientation import acc2q
+from ahrs.common.quaternion import Quaternion
 
 
 def parse_packet(line: str):
-    """
-    Trame Arduino:
-    D,roll,pitch,gx,gy,gz,ax,ay,az,mx,my,mz
-    """
     try:
         if not line.startswith("D,"):
             return None
@@ -37,61 +34,32 @@ def parse_packet(line: str):
         return None
 
 
-def quat_to_euler(q):
-    """Quaternion [w,x,y,z] -> (roll, pitch, yaw) en rad."""
-    qw, qx, qy, qz = q
-
-    # roll (x)
-    sinr_cosp = 2.0 * (qw * qx + qy * qz)
-    cosr_cosp = 1.0 - 2.0 * (qx * qx + qy * qz)
-    roll = math.atan2(sinr_cosp, cosr_cosp)
-
-    # pitch (y)
-    sinp = 2.0 * (qw * qy - qz * qx)
-    if sinp >= 1.0:
-        pitch = math.pi / 2.0
-    elif sinp <= -1.0:
-        pitch = -math.pi / 2.0
-    else:
-        pitch = math.asin(sinp)
-
-    # yaw (z)
-    siny_cosp = 2.0 * (qw * qz + qx * qy)
-    cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
-    yaw = math.atan2(siny_cosp, cosy_cosp)
-
-    return roll, pitch, yaw
-
-
 def main():
     ser = serial.Serial(
-        port="/dev/serial0",   # adapte si besoin (/dev/ttyAMA0 etc.)
+        port="/dev/serial0",
         baudrate=230400,
         timeout=1.0,
     )
 
     time.sleep(0.2)
-    print("Port serie ouvert, test de lecture brute...")
+    print("Port serie ouvert, test de lecture brute")
 
-    # petit apercu des lignes reçues
     for _ in range(3):
         raw = ser.readline().decode(errors="ignore").strip()
         if raw:
             print("RAW:", repr(raw))
 
     sample_freq = 50.0
+    dt = 1.0 / sample_freq
 
-    # d après la doc ahrs: usage streaming
-    # ekf = EKF()
-    # for t: q = ekf.update(q, gyr[t], acc[t])
-    # on ajoute juste frequency et frame
-    ekf = EKF(
+    fourati = Fourati(
         frequency=sample_freq,
-        frame="ENU",
+        gain=0.1,
+        magnetic_dip=None,
     )
 
     q = None
-    print("Lecture UART + EKF gyro+acc+mag en cours...")
+    print("Lecture UART avec Fourati en cours")
 
     while True:
         try:
@@ -106,47 +74,44 @@ def main():
             roll_comp  = data["roll_comp"]
             pitch_comp = data["pitch_comp"]
 
-            # gyro deg/s -> rad/s
             gx_rad = data["gx_deg"] * math.pi / 180.0
             gy_rad = data["gy_deg"] * math.pi / 180.0
             gz_rad = data["gz_deg"] * math.pi / 180.0
-            gyr = np.array([gx_rad, gy_rad, gz_rad], dtype=float)
 
-            # accel m/s^2
-            acc = np.array([data["ax"], data["ay"], data["az"]], dtype=float)
+            gyr = np.array([gy_rad, gx_rad, -gz_rad], dtype=float)
+            acc = np.array([ay, ax, -az], dtype=float)
+            mag = np.array([data["my"], data["mx"], -data["mz"]], dtype=float)
+            # Si ton magnetometre donne des microTesla, active
+            mag = mag / 1000.0
 
-            # mag en uT
-            mag = np.array([data["mx"], data["my"], data["mz"]], dtype=float)
-
-            # init quaternion avec l'acceléromètre
             if q is None:
                 q = acc2q(acc)
                 q = q / np.linalg.norm(q)
-                print("Quaternion initial:", q)
+                print("Quaternion initial", q)
                 continue
 
-            # d après la lib: update(q, gyr, acc)
-            # et dans les versions récentes, mag est supporté comme 4e argument
-            try:
-                q = ekf.update(q, gyr, acc, mag)
-            except TypeError:
-                # si jamais ta version ne prend que 3 args:
-                # on met mag comme état interne et on appelle update(q, gyr, acc)
-                ekf.mag = mag
-                q = ekf.update(q, gyr, acc)
+            q = fourati.update(
+                q=q,
+                gyr=gyr,
+                acc=acc,
+                mag=mag,
+                dt=dt,
+            )
 
-            roll_ekf, pitch_ekf, yaw_ekf = quat_to_euler(q)
-            roll_ekf_deg  = math.degrees(roll_ekf)
-            pitch_ekf_deg = math.degrees(pitch_ekf)
-            yaw_ekf_deg   = math.degrees(yaw_ekf)
+            angles = Quaternion(q).to_angles()
+            roll_f, pitch_f, yaw_f = angles
+
+            roll_f_deg  = math.degrees(roll_f)
+            pitch_f_deg = math.degrees(pitch_f)
+            yaw_f_deg   = math.degrees(yaw_f)
 
             print(
                 f"COMP R={roll_comp:7.2f} P={pitch_comp:7.2f} | "
-                f"EKF R={roll_ekf_deg:7.2f} P={pitch_ekf_deg:7.2f} Y={yaw_ekf_deg:7.2f}"
+                f"FOURATI R={roll_f_deg:7.2f} P={pitch_f_deg:7.2f} Y={yaw_f_deg:7.2f}"
             )
 
         except KeyboardInterrupt:
-            print("\nStop.")
+            print("Stop")
             ser.close()
             break
         except Exception as e:
