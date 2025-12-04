@@ -79,7 +79,7 @@ def main():
             gz_rad = data["gz_deg"] * math.pi / 180.0
 
             gyr = np.array([gy_rad, gx_rad, -gz_rad], dtype=float)
-            acc = np.array([ay, ax, -az], dtype=float)
+            acc = np.array([data["ay"], data["ax"], -data["az"]], dtype=float)
             mag = np.array([data["my"], data["mx"], -data["mz"]], dtype=float)
             # Si ton magnetometre donne des microTesla, active
             mag = mag / 1000.0
