@@ -88,10 +88,10 @@ def imu_thread():
             gx_rad = data["gx_deg"] * math.pi / 180.0
             gy_rad = data["gy_deg"] * math.pi / 180.0
             gz_rad = data["gz_deg"] * math.pi / 180.0
-            gyr = np.array([gx_rad, gy_rad, gz_rad], dtype=float)
+            gyr = np.array([gy_rad, gx_rad, -gz_rad], dtype=float)
 
             # Accéléromètre (déjà en m/s²)
-            acc = np.array([data["ax"], data["ay"], data["az"]], dtype=float)
+            acc = np.array([data["ay"], data["ax"], -data["az"]], dtype=float) # convention NED
             
             # CORRECTION CRITIQUE: Normaliser l'accéléromètre
             acc_norm = np.linalg.norm(acc)
@@ -99,7 +99,7 @@ def imu_thread():
                 acc = acc / acc_norm
 
             # Magnétomètre µT -> mT
-            mag = np.array([data["mx"], data["my"], data["mz"]], dtype=float) / 1000.0
+            mag = np.array([data["my"], data["mx"], -data["mz"]], dtype=float) / 1000.0
             
             # CORRECTION CRITIQUE: Normaliser le magnétomètre
             mag_norm = np.linalg.norm(mag)
