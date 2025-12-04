@@ -1,13 +1,20 @@
-#!/usr/bin/env python3
 import serial
 import time
 import math
-import json
 import numpy as np
+import json
+from flask import Flask, render_template
+from flask_socketio import SocketIO
+import threading
 
 from ahrs.filters import Fourati
 from ahrs.common.orientation import acc2q
 from ahrs.common.quaternion import Quaternion
+
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'imu_visualization_secret'
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 
 def parse_packet(line: str):
@@ -22,13 +29,13 @@ def parse_packet(line: str):
         return {
             "roll_comp":  float(parts[1]),
             "pitch_comp": float(parts[2]),
-            "gx_deg":     float(parts[3]),   # deg/s confirme
+            "gx_deg":     float(parts[3]),
             "gy_deg":     float(parts[4]),
             "gz_deg":     float(parts[5]),
-            "ax":         float(parts[6]),   # m/s^2
+            "ax":         float(parts[6]),
             "ay":         float(parts[7]),
             "az":         float(parts[8]),
-            "mx":         float(parts[9]),   # µT
+            "mx":         float(parts[9]),
             "my":         float(parts[10]),
             "mz":         float(parts[11]),
         }
@@ -36,7 +43,9 @@ def parse_packet(line: str):
         return None
 
 
-def main():
+def imu_thread():
+    """Thread qui lit les données série et met à jour le filtre Fourati"""
+    
     ser = serial.Serial(
         port="/dev/serial0",
         baudrate=230400,
@@ -44,13 +53,10 @@ def main():
     )
 
     time.sleep(0.2)
+    print("Port série ouvert")
 
     sample_freq = 50.0
-
-    # facteur d echelle gyro (1.0 puisque tu as verifie deg/s)
     gyro_scale = 1.0
-
-    # dip magnetique approximatif France metropolitaine
     magnetic_dip_deg = 64.0
 
     fourati = Fourati(
@@ -59,7 +65,6 @@ def main():
     )
 
     q = None
-
     last_t = time.time()
 
     while True:
@@ -70,7 +75,7 @@ def main():
 
             now = time.time()
             dt = now - last_t
-            if dt <= 0.0 or dt > 0.2:  # securite si gros trou
+            if dt <= 0.0:
                 dt = 1.0 / sample_freq
             last_t = now
 
@@ -78,28 +83,26 @@ def main():
             if data is None:
                 continue
 
-            # gyro deg/s -> rad/s
+            # Conversion gyroscope
             gx_rad = data["gx_deg"] * gyro_scale * math.pi / 180.0
             gy_rad = data["gy_deg"] * gyro_scale * math.pi / 180.0
             gz_rad = data["gz_deg"] * gyro_scale * math.pi / 180.0
             gyr = np.array([gx_rad, gy_rad, gz_rad], dtype=float)
 
-            # accel m/s^2
+            # Accéléromètre
             acc = np.array([data["ax"], data["ay"], data["az"]], dtype=float)
 
-            # mag µT -> mT
-            mag = np.array(
-                [data["mx"], data["my"], data["mz"]],
-                dtype=float
-            ) / 1000.0
+            # Magnétomètre µT -> mT
+            mag = np.array([data["mx"], data["my"], data["mz"]], dtype=float) / 1000.0
 
-            # init quaternion avec gravite au premier paquet valide
+            # Initialisation du quaternion
             if q is None:
                 q = acc2q(acc)
                 q = q / np.linalg.norm(q)
-                # on ne publie pas encore, on attend la prochaine boucle
+                print("Quaternion initial:", q)
                 continue
 
+            # Mise à jour Fourati
             q = fourati.update(
                 q=q,
                 gyr=gyr,
@@ -108,10 +111,7 @@ def main():
                 dt=dt,
             )
 
-            if q is None:
-                # si Fourati renvoie None pour une raison quelconque
-                continue
-
+            # Conversion en angles d'Euler
             angles = Quaternion(q).to_angles()
             roll_f, pitch_f, yaw_f = angles
 
@@ -119,24 +119,49 @@ def main():
             pitch_f_deg = math.degrees(pitch_f)
             yaw_f_deg   = math.degrees(yaw_f)
 
-            payload = {
-                "t": now,
-                "roll_deg":  roll_f_deg,
-                "pitch_deg": pitch_f_deg,
-                "yaw_deg":   yaw_f_deg,
-                "roll_comp": data["roll_comp"],
-                "pitch_comp": data["pitch_comp"],
+            # Envoi des données via WebSocket
+            orientation_data = {
+                'roll': roll_f_deg,
+                'pitch': pitch_f_deg,
+                'yaw': yaw_f_deg,
+                'roll_comp': data["roll_comp"],
+                'pitch_comp': data["pitch_comp"],
+                'dt': dt * 1000.0
             }
+            
+            socketio.emit('orientation_update', orientation_data)
 
-            print(json.dumps(payload), flush=True)
+            print(
+                f"COMP R={data['roll_comp']:7.2f} P={data['pitch_comp']:7.2f} | "
+                f"FOURATI R={roll_f_deg:7.2f} P={pitch_f_deg:7.2f} Y={yaw_f_deg:7.2f}"
+            )
 
-        except KeyboardInterrupt:
-            break
         except Exception as e:
-            # tu peux logger sur stderr si tu veux
-            # mais pas de print normal pour ne pas casser le JSON
-            continue
+            print("Erreur IMU thread:", e)
 
 
-if __name__ == "__main__":
-    main()
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+
+@socketio.on('connect')
+def handle_connect():
+    print('Client connecté')
+
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('Client déconnecté')
+
+
+if __name__ == '__main__':
+    # Démarrage du thread IMU
+    imu_thread_instance = threading.Thread(target=imu_thread, daemon=True)
+    imu_thread_instance.start()
+    
+    print("Serveur démarré sur http://0.0.0.0:5000")
+    print("Ouvrez cette adresse dans votre navigateur")
+    
+    # Démarrage du serveur Flask
+    socketio.run(app, host='0.0.0.0', port=5000, debug=False)
