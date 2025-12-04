@@ -74,18 +74,22 @@ def main():
             roll_comp  = data["roll_comp"]
             pitch_comp = data["pitch_comp"]
 
+            # gyro deg/s -> rad/s, repere corps tel quel
             gx_rad = data["gx_deg"] * math.pi / 180.0
             gy_rad = data["gy_deg"] * math.pi / 180.0
             gz_rad = data["gz_deg"] * math.pi / 180.0
+            gyr = np.array([gx_rad, gy_rad, gz_rad], dtype=float)
 
-            gyr = np.array([gy_rad, gx_rad, -gz_rad], dtype=float)
-            acc = np.array([data["ay"], data["ax"], -data["az"]], dtype=float)
-            mag = np.array([data["my"], data["mx"], -data["mz"]], dtype=float)
-            # Si ton magnetometre donne des microTesla, active
-            mag = mag / 1000.0
+            # accel m/s^2
+            acc = np.array([data["ax"], data["ay"], data["az"]], dtype=float)
 
+            # mag en µT -> mT (doc Fourati: mT)
+            mag = np.array([data["mx"], data["my"], data["mz"]], dtype=float)
+            mag = mag * 1000.0
+
+            # init quaternion avec gravité
             if q is None:
-                q = acc2q(acc)
+                q = acc2q(acc)      # acc en repere corps
                 q = q / np.linalg.norm(q)
                 print("Quaternion initial", q)
                 continue
