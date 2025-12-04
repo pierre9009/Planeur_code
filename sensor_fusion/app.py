@@ -9,7 +9,6 @@ import threading
 
 from ahrs.filters import Fourati
 from ahrs.common.orientation import acc2q
-from ahrs.common.quaternion import Quaternion
 
 
 app = Flask(__name__)
@@ -43,6 +42,33 @@ def parse_packet(line: str):
         return None
 
 
+def quaternion_to_euler_zyx(q):
+    """
+    Convertit un quaternion [w, x, y, z] en angles d'Euler (roll, pitch, yaw)
+    Convention: ZYX (Yaw-Pitch-Roll) intrinsèque
+    """
+    w, x, y, z = q[0], q[1], q[2], q[3]
+    
+    # Roll (rotation autour de X)
+    sinr_cosp = 2.0 * (w * x + y * z)
+    cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
+    roll = math.atan2(sinr_cosp, cosr_cosp)
+    
+    # Pitch (rotation autour de Y)
+    sinp = 2.0 * (w * y - z * x)
+    if abs(sinp) >= 1:
+        pitch = math.copysign(math.pi / 2, sinp)  # Gimbal lock
+    else:
+        pitch = math.asin(sinp)
+    
+    # Yaw (rotation autour de Z)
+    siny_cosp = 2.0 * (w * z + x * y)
+    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+    yaw = math.atan2(siny_cosp, cosy_cosp)
+    
+    return roll, pitch, yaw
+
+
 def imu_thread():
     """Thread qui lit les données série et met à jour le filtre Fourati"""
     
@@ -55,53 +81,74 @@ def imu_thread():
     time.sleep(0.2)
     print("Port série ouvert")
     print("\n" + "="*70)
-    print("DIAGNOSTIC: Placez le capteur À PLAT et immobile pendant 3 secondes...")
+    print("INITIALISATION - Placez le capteur À PLAT pendant 3 secondes...")
     print("="*70 + "\n")
 
-    # Attendre et lire quelques échantillons pour diagnostic
+    # Attendre et nettoyer le buffer
     time.sleep(1)
     for _ in range(10):
         ser.readline()
     
-    # Diagnostic de l'orientation
+    # Diagnostic et initialisation
     diag_samples = []
-    for _ in range(20):
+    for _ in range(30):
         line = ser.readline().decode(errors="ignore").strip()
         data = parse_packet(line)
         if data:
             diag_samples.append(data)
     
-    if diag_samples:
-        avg_az = np.mean([d["az"] for d in diag_samples])
-        print(f"Accéléromètre Z moyen (capteur à plat): {avg_az:.2f} m/s²")
-        
-        if avg_az > 5.0:
-            frame_type = "ENU"
-            print("→ Z pointe VERS LE HAUT → Utilisation de frame='ENU'")
-        elif avg_az < -5.0:
-            frame_type = "NED"
-            print("→ Z pointe VERS LE BAS → Utilisation de frame='NED'")
+    if not diag_samples:
+        print("⚠️  ERREUR: Pas de données reçues!")
+        return
+
+    # Calcul de la moyenne pour l'initialisation
+    avg_ax = np.mean([d["ax"] for d in diag_samples])
+    avg_ay = np.mean([d["ay"] for d in diag_samples])
+    avg_az = np.mean([d["az"] for d in diag_samples])
+    
+    print(f"Accéléromètre moyen (à plat):")
+    print(f"  X: {avg_ax:.2f} m/s²")
+    print(f"  Y: {avg_ay:.2f} m/s²")
+    print(f"  Z: {avg_az:.2f} m/s²")
+    
+    # Déterminer l'orientation du capteur
+    if abs(avg_az) > 8.0:  # L'axe Z est vertical
+        if avg_az > 0:
+            print("→ Capteur à plat, Z pointe VERS LE HAUT")
+            z_sign = 1
         else:
-            frame_type = "ENU"
-            print(f"⚠️  ATTENTION: Z={avg_az:.2f} n'est pas proche de ±9.8")
-            print("→ Utilisation de frame='ENU' par défaut")
-        
-        print("="*70 + "\n")
+            print("→ Capteur à plat, Z pointe VERS LE BAS")
+            z_sign = -1
     else:
-        frame_type = "ENU"
-        print("⚠️  Pas de données pour diagnostic, utilisation de ENU par défaut\n")
+        print(f"⚠️  ATTENTION: Le capteur n'est pas à plat!")
+        print(f"   Gravité mesurée: {math.sqrt(avg_ax**2 + avg_ay**2 + avg_az**2):.2f} m/s²")
+        z_sign = 1
+    
+    print("="*70 + "\n")
 
     sample_freq = 50.0
-    magnetic_dip_deg = 64.0
+    magnetic_dip_deg = 64.0  # Inclinaison magnétique à Paris
 
-    # CORRECTION: Augmenter le gain + utiliser la bonne frame
+    # Configuration Fourati avec gain plus élevé
     fourati = Fourati(
         frequency=sample_freq,
         magnetic_dip=magnetic_dip_deg,
-        gain=0.5,
+        gain=1.0,  # Gain augmenté pour plus de réactivité
     )
 
-    q = None
+    # Initialisation du quaternion avec l'accéléromètre moyen
+    init_acc = np.array([avg_ax, avg_ay, avg_az * z_sign])
+    init_acc = init_acc / np.linalg.norm(init_acc)
+    q = acc2q(init_acc)
+    q = q / np.linalg.norm(q)
+    
+    print(f"Quaternion initial: [{q[0]:.4f}, {q[1]:.4f}, {q[2]:.4f}, {q[3]:.4f}]")
+    
+    # Test de conversion
+    test_roll, test_pitch, test_yaw = quaternion_to_euler_zyx(q)
+    print(f"Angles initiaux: R={math.degrees(test_roll):.2f}° P={math.degrees(test_pitch):.2f}° Y={math.degrees(test_yaw):.2f}°")
+    print()
+
     last_t = time.time()
 
     while True:
@@ -120,67 +167,58 @@ def imu_thread():
             if data is None:
                 continue
 
-            # Conversion gyroscope en rad/s (GARDER L'ORDRE ORIGINAL!)
+            # Gyroscope en rad/s (GARDER L'ORDRE ORIGINAL)
             gx_rad = data["gx_deg"] * math.pi / 180.0
             gy_rad = data["gy_deg"] * math.pi / 180.0
             gz_rad = data["gz_deg"] * math.pi / 180.0
-            
-            # CORRECTION: Ne PAS inverser X et Y! Garder l'ordre du capteur
-            # Adapter seulement si frame=NED vs ENU
-            if frame_type == "NED":
-                gyr = np.array([gx_rad, gy_rad, -gz_rad], dtype=float)
-            else:  # ENU
-                gyr = np.array([gx_rad, gy_rad, gz_rad], dtype=float)
+            gyr = np.array([gx_rad, gy_rad, gz_rad * z_sign], dtype=float)
 
-            # Accéléromètre (déjà en m/s²) - GARDER L'ORDRE ORIGINAL
-            if frame_type == "NED":
-                acc = np.array([data["ax"], data["ay"], -data["az"]], dtype=float)
-            else:  # ENU
-                acc = np.array([data["ax"], data["ay"], data["az"]], dtype=float)
+            # Accéléromètre (GARDER L'ORDRE ORIGINAL)
+            acc = np.array([data["ax"], data["ay"], data["az"] * z_sign], dtype=float)
             
-            # CORRECTION CRITIQUE: Normaliser l'accéléromètre
+            # NORMALISATION CRITIQUE
             acc_norm = np.linalg.norm(acc)
-            if acc_norm > 0.1:  # Éviter division par zéro
+            if acc_norm > 0.1:
                 acc = acc / acc_norm
             else:
-                print(f"⚠️  Accéléromètre norme trop faible: {acc_norm:.3f}")
+                continue  # Skip ce sample si l'accéléromètre est invalide
 
-            # Magnétomètre µT -> mT - GARDER L'ORDRE ORIGINAL
-            if frame_type == "NED":
-                mag = np.array([data["mx"], data["my"], -data["mz"]], dtype=float) / 1000.0
-            else:  # ENU
-                mag = np.array([data["mx"], data["my"], data["mz"]], dtype=float) / 1000.0
+            # Magnétomètre µT -> mT (GARDER L'ORDRE ORIGINAL)
+            mag = np.array([data["mx"], data["my"], data["mz"] * z_sign], dtype=float) / 1000.0
             
-            # CORRECTION CRITIQUE: Normaliser le magnétomètre
+            # NORMALISATION CRITIQUE
             mag_norm = np.linalg.norm(mag)
-            if mag_norm > 0.001:  # Éviter division par zéro
+            if mag_norm > 0.001:
                 mag = mag / mag_norm
             else:
-                print(f"⚠️  Magnétomètre norme trop faible: {mag_norm:.6f}")
-
-            # Initialisation du quaternion
-            if q is None:
-                q = acc2q(acc)
-                q = q / np.linalg.norm(q)
-                print("Quaternion initial:", q)
-                continue
+                # Si le magnétomètre est invalide, utiliser seulement acc + gyro
+                mag = None
 
             # Mise à jour Fourati
-            q = fourati.update(
-                q=q,
-                gyr=gyr,
-                acc=acc,
-                mag=mag,
-                dt=dt,
-            )
+            if mag is not None:
+                q = fourati.update(
+                    q=q,
+                    gyr=gyr,
+                    acc=acc,
+                    mag=mag,
+                    dt=dt,
+                )
+            else:
+                # Mode sans magnétomètre (IMU 6 axes)
+                q = fourati.update(
+                    q=q,
+                    gyr=gyr,
+                    acc=acc,
+                    mag=np.array([1.0, 0.0, 0.0]),  # Magnétomètre fictif
+                    dt=dt,
+                )
 
-            # CORRECTION: Normaliser le quaternion après mise à jour
+            # Normalisation du quaternion
             q = q / np.linalg.norm(q)
 
-            # Conversion en angles d'Euler
-            angles = Quaternion(q).to_angles()
-            roll_f, pitch_f, yaw_f = angles
-
+            # Conversion en angles d'Euler (convention ZYX)
+            roll_f, pitch_f, yaw_f = quaternion_to_euler_zyx(q)
+            
             roll_f_deg  = math.degrees(roll_f)
             pitch_f_deg = math.degrees(pitch_f)
             yaw_f_deg   = math.degrees(yaw_f)
@@ -197,10 +235,11 @@ def imu_thread():
             
             socketio.emit('orientation_update', orientation_data)
 
-            #print(
-            #    f"COMP R={data['roll_comp']:7.2f} P={data['pitch_comp']:7.2f} | "
-            #    f"FOURATI R={roll_f_deg:7.2f} P={pitch_f_deg:7.2f} Y={yaw_f_deg:7.2f}"
-            #)
+            print(
+                f"COMP R={data['roll_comp']:7.2f} P={data['pitch_comp']:7.2f} | "
+                f"FOURATI R={roll_f_deg:7.2f} P={pitch_f_deg:7.2f} Y={yaw_f_deg:7.2f} | "
+                f"dt={dt*1000:.1f}ms"
+            )
 
         except Exception as e:
             print("Erreur IMU thread:", e)

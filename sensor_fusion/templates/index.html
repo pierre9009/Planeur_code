@@ -227,7 +227,7 @@
         gridHelper.position.y = -2;
         scene.add(gridHelper);
         
-        // Axes de référence
+        // Axes de référence (X=Rouge, Y=Vert, Z=Bleu)
         const axesHelper = new THREE.AxesHelper(3);
         axesHelper.position.y = -1.8;
         scene.add(axesHelper);
@@ -248,14 +248,16 @@
         });
         
         socket.on('orientation_update', (data) => {
-            // Mise à jour de l'orientation de l'avion
             // Conversion degrés -> radians
             const roll = data.roll * Math.PI / 180;
             const pitch = data.pitch * Math.PI / 180;
             const yaw = data.yaw * Math.PI / 180;
             
-            // Application de la rotation (ordre ZYX - Yaw, Pitch, Roll)
-            planeGroup.rotation.set(pitch, yaw, roll, 'ZYX');
+            // CORRECTION CRITIQUE: Ordre correct pour Three.js avec Euler ZYX
+            // Three.js utilise la convention: rotation.x = pitch, rotation.y = yaw, rotation.z = roll
+            planeGroup.rotation.x = pitch;   // Rotation autour de X (tangage)
+            planeGroup.rotation.y = yaw;     // Rotation autour de Y (lacet)
+            planeGroup.rotation.z = roll;    // Rotation autour de Z (roulis)
             
             // Mise à jour de l'affichage
             document.getElementById('roll-value').textContent = data.roll.toFixed(2) + '°';
