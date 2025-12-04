@@ -197,10 +197,10 @@ def imu_thread():
             
             socketio.emit('orientation_update', orientation_data)
 
-            print(
-                f"COMP R={data['roll_comp']:7.2f} P={data['pitch_comp']:7.2f} | "
-                f"FOURATI R={roll_f_deg:7.2f} P={pitch_f_deg:7.2f} Y={yaw_f_deg:7.2f}"
-            )
+            #print(
+            #    f"COMP R={data['roll_comp']:7.2f} P={data['pitch_comp']:7.2f} | "
+            #    f"FOURATI R={roll_f_deg:7.2f} P={pitch_f_deg:7.2f} Y={yaw_f_deg:7.2f}"
+            #)
 
         except Exception as e:
             print("Erreur IMU thread:", e)
