@@ -54,15 +54,51 @@ def imu_thread():
 
     time.sleep(0.2)
     print("Port série ouvert")
+    print("\n" + "="*70)
+    print("DIAGNOSTIC: Placez le capteur À PLAT et immobile pendant 3 secondes...")
+    print("="*70 + "\n")
+
+    # Attendre et lire quelques échantillons pour diagnostic
+    time.sleep(1)
+    for _ in range(10):
+        ser.readline()
+    
+    # Diagnostic de l'orientation
+    diag_samples = []
+    for _ in range(20):
+        line = ser.readline().decode(errors="ignore").strip()
+        data = parse_packet(line)
+        if data:
+            diag_samples.append(data)
+    
+    if diag_samples:
+        avg_az = np.mean([d["az"] for d in diag_samples])
+        print(f"Accéléromètre Z moyen (capteur à plat): {avg_az:.2f} m/s²")
+        
+        if avg_az > 5.0:
+            frame_type = "ENU"
+            print("→ Z pointe VERS LE HAUT → Utilisation de frame='ENU'")
+        elif avg_az < -5.0:
+            frame_type = "NED"
+            print("→ Z pointe VERS LE BAS → Utilisation de frame='NED'")
+        else:
+            frame_type = "ENU"
+            print(f"⚠️  ATTENTION: Z={avg_az:.2f} n'est pas proche de ±9.8")
+            print("→ Utilisation de frame='ENU' par défaut")
+        
+        print("="*70 + "\n")
+    else:
+        frame_type = "ENU"
+        print("⚠️  Pas de données pour diagnostic, utilisation de ENU par défaut\n")
 
     sample_freq = 50.0
     magnetic_dip_deg = 64.0
 
-    # CORRECTION: Augmenter le gain pour une meilleure réactivité
+    # CORRECTION: Augmenter le gain + utiliser la bonne frame
     fourati = Fourati(
         frequency=sample_freq,
         magnetic_dip=magnetic_dip_deg,
-        gain=0.5,  # Augmenté de 0.1 (défaut) à 0.5
+        gain=0.5,
     )
 
     q = None
@@ -84,27 +120,43 @@ def imu_thread():
             if data is None:
                 continue
 
-            # Conversion gyroscope en rad/s
+            # Conversion gyroscope en rad/s (GARDER L'ORDRE ORIGINAL!)
             gx_rad = data["gx_deg"] * math.pi / 180.0
             gy_rad = data["gy_deg"] * math.pi / 180.0
             gz_rad = data["gz_deg"] * math.pi / 180.0
-            gyr = np.array([gy_rad, gx_rad, -gz_rad], dtype=float)
+            
+            # CORRECTION: Ne PAS inverser X et Y! Garder l'ordre du capteur
+            # Adapter seulement si frame=NED vs ENU
+            if frame_type == "NED":
+                gyr = np.array([gx_rad, gy_rad, -gz_rad], dtype=float)
+            else:  # ENU
+                gyr = np.array([gx_rad, gy_rad, gz_rad], dtype=float)
 
-            # Accéléromètre (déjà en m/s²)
-            acc = np.array([data["ay"], data["ax"], -data["az"]], dtype=float) # convention NED
+            # Accéléromètre (déjà en m/s²) - GARDER L'ORDRE ORIGINAL
+            if frame_type == "NED":
+                acc = np.array([data["ax"], data["ay"], -data["az"]], dtype=float)
+            else:  # ENU
+                acc = np.array([data["ax"], data["ay"], data["az"]], dtype=float)
             
             # CORRECTION CRITIQUE: Normaliser l'accéléromètre
             acc_norm = np.linalg.norm(acc)
             if acc_norm > 0.1:  # Éviter division par zéro
                 acc = acc / acc_norm
+            else:
+                print(f"⚠️  Accéléromètre norme trop faible: {acc_norm:.3f}")
 
-            # Magnétomètre µT -> mT
-            mag = np.array([data["my"], data["mx"], -data["mz"]], dtype=float) / 1000.0
+            # Magnétomètre µT -> mT - GARDER L'ORDRE ORIGINAL
+            if frame_type == "NED":
+                mag = np.array([data["mx"], data["my"], -data["mz"]], dtype=float) / 1000.0
+            else:  # ENU
+                mag = np.array([data["mx"], data["my"], data["mz"]], dtype=float) / 1000.0
             
             # CORRECTION CRITIQUE: Normaliser le magnétomètre
             mag_norm = np.linalg.norm(mag)
             if mag_norm > 0.001:  # Éviter division par zéro
                 mag = mag / mag_norm
+            else:
+                print(f"⚠️  Magnétomètre norme trop faible: {mag_norm:.6f}")
 
             # Initialisation du quaternion
             if q is None:
