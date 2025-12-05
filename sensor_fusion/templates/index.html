@@ -180,13 +180,19 @@
         planeGroup.add(fuselage);
         
         // Ailes
-        const wingGeometry = new THREE.BoxGeometry(6, 0.1, 1);
+        // width = 1  -> axe X (corde)
+        // height = 0.1 -> épaisseur
+        // depth = 6 -> axe Z (envergure, perpendiculaire au fuselage)
+        const wingGeometry = new THREE.BoxGeometry(1, 0.1, 6);
         const wingMaterial = new THREE.MeshPhongMaterial({ 
             color: 0x5aa3e8,
             shininess: 80
         });
         const wings = new THREE.Mesh(wingGeometry, wingMaterial);
-        wings.position.z = -0.3;
+
+        // On centre les ailes sur le fuselage
+        wings.position.set(0, 0, 0);
+
         wings.castShadow = true;
         planeGroup.add(wings);
         
