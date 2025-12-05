@@ -3,17 +3,10 @@ import time
 import math
 import numpy as np
 import json
-from flask import Flask, render_template
-from flask_socketio import SocketIO
-import threading
+import sys
 
 from ahrs.filters import Fourati
 from ahrs.common.orientation import acc2q
-
-
-app = Flask(__name__)
-app.config['SECRET_KEY'] = 'imu_visualization_secret'
-socketio = SocketIO(app, cors_allowed_origins="*")
 
 
 def parse_packet(line: str):
@@ -69,8 +62,11 @@ def quaternion_to_euler_zyx(q):
     return roll, pitch, yaw
 
 
-def imu_thread():
-    """Thread qui lit les données série et met à jour le filtre Fourati"""
+def run_imu_fusion():
+    """
+    Processus principal de fusion IMU.
+    Envoie les données d'orientation sur stdout en JSON.
+    """
     
     ser = serial.Serial(
         port="/dev/serial0",
@@ -79,10 +75,10 @@ def imu_thread():
     )
 
     time.sleep(0.2)
-    print("Port série ouvert")
-    print("\n" + "="*70)
-    print("INITIALISATION - Placez le capteur À PLAT pendant 3 secondes...")
-    print("="*70 + "\n")
+    print("Port série ouvert", file=sys.stderr)
+    print("\n" + "="*70, file=sys.stderr)
+    print("INITIALISATION - Placez le capteur À PLAT pendant 3 secondes...", file=sys.stderr)
+    print("="*70 + "\n", file=sys.stderr)
 
     # Attendre et nettoyer le buffer
     time.sleep(1)
@@ -98,7 +94,7 @@ def imu_thread():
             diag_samples.append(data)
     
     if not diag_samples:
-        print("⚠️  ERREUR: Pas de données reçues!")
+        print("⚠️  ERREUR: Pas de données reçues!", file=sys.stderr)
         return
 
     # Calcul de la moyenne pour l'initialisation
@@ -106,25 +102,25 @@ def imu_thread():
     avg_ay = np.mean([d["ay"] for d in diag_samples])
     avg_az = np.mean([d["az"] for d in diag_samples])
     
-    print(f"Accéléromètre moyen (à plat):")
-    print(f"  X: {avg_ax:.2f} m/s²")
-    print(f"  Y: {avg_ay:.2f} m/s²")
-    print(f"  Z: {avg_az:.2f} m/s²")
+    print(f"Accéléromètre moyen (à plat):", file=sys.stderr)
+    print(f"  X: {avg_ax:.2f} m/s²", file=sys.stderr)
+    print(f"  Y: {avg_ay:.2f} m/s²", file=sys.stderr)
+    print(f"  Z: {avg_az:.2f} m/s²", file=sys.stderr)
     
     # Déterminer l'orientation du capteur
     if abs(avg_az) > 8.0:  # L'axe Z est vertical
         if avg_az > 0:
-            print("→ Capteur à plat, Z pointe VERS LE HAUT")
+            print("→ Capteur à plat, Z pointe VERS LE HAUT", file=sys.stderr)
             z_sign = 1
         else:
-            print("→ Capteur à plat, Z pointe VERS LE BAS")
+            print("→ Capteur à plat, Z pointe VERS LE BAS", file=sys.stderr)
             z_sign = -1
     else:
-        print(f"⚠️  ATTENTION: Le capteur n'est pas à plat!")
-        print(f"   Gravité mesurée: {math.sqrt(avg_ax**2 + avg_ay**2 + avg_az**2):.2f} m/s²")
+        print(f"⚠️  ATTENTION: Le capteur n'est pas à plat!", file=sys.stderr)
+        print(f"   Gravité mesurée: {math.sqrt(avg_ax**2 + avg_ay**2 + avg_az**2):.2f} m/s²", file=sys.stderr)
         z_sign = 1
     
-    print("="*70 + "\n")
+    print("="*70 + "\n", file=sys.stderr)
 
     sample_freq = 50.0
     magnetic_dip_deg = 64.0  # Inclinaison magnétique à Paris
@@ -142,12 +138,12 @@ def imu_thread():
     q = acc2q(init_acc)
     q = q / np.linalg.norm(q)
     
-    print(f"Quaternion initial: [{q[0]:.4f}, {q[1]:.4f}, {q[2]:.4f}, {q[3]:.4f}]")
+    print(f"Quaternion initial: [{q[0]:.4f}, {q[1]:.4f}, {q[2]:.4f}, {q[3]:.4f}]", file=sys.stderr)
     
     # Test de conversion
     test_roll, test_pitch, test_yaw = quaternion_to_euler_zyx(q)
-    print(f"Angles initiaux: R={math.degrees(test_roll):.2f}° P={math.degrees(test_pitch):.2f}° Y={math.degrees(test_yaw):.2f}°")
-    print()
+    print(f"Angles initiaux: R={math.degrees(test_roll):.2f}° P={math.degrees(test_pitch):.2f}° Y={math.degrees(test_yaw):.2f}°", file=sys.stderr)
+    print(file=sys.stderr)
 
     last_t = time.time()
 
@@ -223,7 +219,7 @@ def imu_thread():
             pitch_f_deg = math.degrees(pitch_f)
             yaw_f_deg   = math.degrees(yaw_f)
 
-            # Envoi des données via WebSocket
+            # Envoi des données via stdout en JSON
             orientation_data = {
                 'roll': roll_f_deg,
                 'pitch': pitch_f_deg,
@@ -233,42 +229,22 @@ def imu_thread():
                 'dt': dt * 1000.0
             }
             
-            socketio.emit('orientation_update', orientation_data)
+            # Envoyer JSON sur stdout
+            print(json.dumps(orientation_data), flush=True)
 
+            # Log sur stderr
             print(
                 f"COMP R={data['roll_comp']:7.2f} P={data['pitch_comp']:7.2f} | "
                 f"FOURATI R={roll_f_deg:7.2f} P={pitch_f_deg:7.2f} Y={yaw_f_deg:7.2f} | "
-                f"dt={dt*1000:.1f}ms"
+                f"dt={dt*1000:.1f}ms",
+                file=sys.stderr
             )
 
         except Exception as e:
-            print("Erreur IMU thread:", e)
+            print("Erreur IMU fusion:", e, file=sys.stderr)
             import traceback
-            traceback.print_exc()
-
-
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-
-@socketio.on('connect')
-def handle_connect():
-    print('Client connecté')
-
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    print('Client déconnecté')
+            traceback.print_exc(file=sys.stderr)
 
 
 if __name__ == '__main__':
-    # Démarrage du thread IMU
-    imu_thread_instance = threading.Thread(target=imu_thread, daemon=True)
-    imu_thread_instance.start()
-    
-    print("Serveur démarré sur http://0.0.0.0:5000")
-    print("Ouvrez cette adresse dans votre navigateur")
-    
-    # Démarrage du serveur Flask
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False)
+    run_imu_fusion()
