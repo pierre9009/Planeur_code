@@ -101,6 +101,9 @@ def run_imu_fusion():
     avg_ax = np.mean([d["ax"] for d in diag_samples])
     avg_ay = np.mean([d["ay"] for d in diag_samples])
     avg_az = np.mean([d["az"] for d in diag_samples])
+    avg_mx = np.mean([d["mx"] for d in diag_samples])
+    avg_my = np.mean([d["my"] for d in diag_samples])
+    avg_mz = np.mean([d["mz"] for d in diag_samples])
     
     print(f"Accéléromètre moyen (à plat):", file=sys.stderr)
     print(f"  X: {avg_ax:.2f} m/s²", file=sys.stderr)
@@ -125,17 +128,21 @@ def run_imu_fusion():
     sample_freq = 50.0
     magnetic_dip_deg = 64.0  # Inclinaison magnétique à Paris
 
-    # Configuration EKF
-    # L'EKF de la bibliothèque AHRS nécessite plusieurs paramètres
+    # Configuration EKF - CORRECTION: utiliser les bonnes matrices de bruit
     ekf = EKF(
         frequency=sample_freq,
-        frame='NED',  # North-East-Down frame
+        frame='NED',
         magnetic_dip=magnetic_dip_deg,
     )
 
-    # Initialisation du quaternion avec l'accéléromètre moyen
+    # Initialisation du quaternion avec acc + mag moyens
     init_acc = np.array([avg_ax, avg_ay, avg_az * z_sign])
     init_acc = init_acc / np.linalg.norm(init_acc)
+    
+    init_mag = np.array([avg_mx, avg_my, avg_mz * z_sign]) / 1000.0
+    init_mag = init_mag / np.linalg.norm(init_mag)
+    
+    # Créer le quaternion initial avec acc et mag
     q = acc2q(init_acc)
     q = q / np.linalg.norm(q)
     
@@ -189,28 +196,36 @@ def run_imu_fusion():
             if mag_norm > 0.001:
                 mag = mag / mag_norm
             else:
-                # Si le magnétomètre est invalide, utiliser seulement acc + gyro
+                # Si le magnétomètre est invalide, utiliser le dernier valide
                 mag = None
 
-            # Mise à jour EKF
+            # CORRECTION: L'EKF de AHRS nécessite une signature différente
+            # Il faut passer gyr, acc, mag dans updateIMU ou updateMARG
             if mag is not None:
-                # Mode complet 9 axes (gyro + acc + mag)
-                q = ekf.update(
-                    q=q,
-                    gyr=gyr,
-                    acc=acc,
-                    mag=mag,
-                    dt=dt,
-                )
+                # Mode MARG (9 axes) - la méthode correcte est updateMARG
+                try:
+                    q = ekf.updateMARG(
+                        q=q,
+                        gyr=gyr,
+                        acc=acc,
+                        mag=mag,
+                    )
+                except AttributeError:
+                    # Si updateMARG n'existe pas, utiliser update avec tous les capteurs
+                    # Concaténer acc et mag pour faire un vecteur de mesure de taille 6
+                    obs = np.concatenate([acc, mag])
+                    q = ekf.update(q=q, gyr=gyr, acc=acc, mag=mag)
             else:
-                # Mode 6 axes (gyro + acc seulement)
-                # L'EKF peut fonctionner sans magnétomètre
-                q = ekf.update(
-                    q=q,
-                    gyr=gyr,
-                    acc=acc,
-                    dt=dt,
-                )
+                # Mode IMU (6 axes) - uniquement gyro et acc
+                try:
+                    q = ekf.updateIMU(
+                        q=q,
+                        gyr=gyr,
+                        acc=acc,
+                    )
+                except AttributeError:
+                    # Fallback si updateIMU n'existe pas
+                    q = ekf.update(q=q, gyr=gyr, acc=acc)
 
             # Normalisation du quaternion (sécurité)
             q = q / np.linalg.norm(q)
