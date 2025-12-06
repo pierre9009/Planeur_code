@@ -10,7 +10,7 @@ def parse_args():
         description="Logger IMU sur UART vers un .log compatible imu-calib"
     )
     parser.add_argument(
-        "-p", "--port", required=True,default="/dev/serial0",
+        "-p", "--port",default="/dev/serial0",
         help="Port serie, par exemple COM3 ou /dev/ttyUSB0"
     )
     parser.add_argument(

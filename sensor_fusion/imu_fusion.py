@@ -5,7 +5,7 @@ import numpy as np
 import json
 import sys
 
-from ahrs.filters import Fourati
+from ahrs.filters import EKF
 from ahrs.common.orientation import acc2q
 
 
@@ -64,7 +64,7 @@ def quaternion_to_euler_zyx(q):
 
 def run_imu_fusion():
     """
-    Processus principal de fusion IMU.
+    Processus principal de fusion IMU avec EKF.
     Envoie les données d'orientation sur stdout en JSON.
     """
     
@@ -125,11 +125,12 @@ def run_imu_fusion():
     sample_freq = 50.0
     magnetic_dip_deg = 64.0  # Inclinaison magnétique à Paris
 
-    # Configuration Fourati avec gain plus élevé
-    fourati = Fourati(
+    # Configuration EKF
+    # L'EKF de la bibliothèque AHRS nécessite plusieurs paramètres
+    ekf = EKF(
         frequency=sample_freq,
+        frame='NED',  # North-East-Down frame
         magnetic_dip=magnetic_dip_deg,
-        gain=1.0,  # Gain augmenté pour plus de réactivité
     )
 
     # Initialisation du quaternion avec l'accéléromètre moyen
@@ -143,6 +144,7 @@ def run_imu_fusion():
     # Test de conversion
     test_roll, test_pitch, test_yaw = quaternion_to_euler_zyx(q)
     print(f"Angles initiaux: R={math.degrees(test_roll):.2f}° P={math.degrees(test_pitch):.2f}° Y={math.degrees(test_yaw):.2f}°", file=sys.stderr)
+    print("Utilisation de l'EKF pour la fusion de capteurs", file=sys.stderr)
     print(file=sys.stderr)
 
     last_t = time.time()
@@ -163,26 +165,26 @@ def run_imu_fusion():
             if data is None:
                 continue
 
-            # Gyroscope en rad/s (GARDER L'ORDRE ORIGINAL)
+            # Gyroscope en rad/s (ordre X, Y, Z)
             gx_rad = data["gx_deg"] * math.pi / 180.0
             gy_rad = data["gy_deg"] * math.pi / 180.0
             gz_rad = data["gz_deg"] * math.pi / 180.0
             gyr = np.array([gx_rad, gy_rad, gz_rad * z_sign], dtype=float)
 
-            # Accéléromètre (GARDER L'ORDRE ORIGINAL)
+            # Accéléromètre (ordre X, Y, Z)
             acc = np.array([data["ax"], data["ay"], data["az"] * z_sign], dtype=float)
             
-            # NORMALISATION CRITIQUE
+            # NORMALISATION CRITIQUE de l'accéléromètre
             acc_norm = np.linalg.norm(acc)
             if acc_norm > 0.1:
                 acc = acc / acc_norm
             else:
                 continue  # Skip ce sample si l'accéléromètre est invalide
 
-            # Magnétomètre µT -> mT (GARDER L'ORDRE ORIGINAL)
+            # Magnétomètre µT -> mT (ordre X, Y, Z)
             mag = np.array([data["mx"], data["my"], data["mz"] * z_sign], dtype=float) / 1000.0
             
-            # NORMALISATION CRITIQUE
+            # NORMALISATION CRITIQUE du magnétomètre
             mag_norm = np.linalg.norm(mag)
             if mag_norm > 0.001:
                 mag = mag / mag_norm
@@ -190,9 +192,10 @@ def run_imu_fusion():
                 # Si le magnétomètre est invalide, utiliser seulement acc + gyro
                 mag = None
 
-            # Mise à jour Fourati
+            # Mise à jour EKF
             if mag is not None:
-                q = fourati.update(
+                # Mode complet 9 axes (gyro + acc + mag)
+                q = ekf.update(
                     q=q,
                     gyr=gyr,
                     acc=acc,
@@ -200,30 +203,30 @@ def run_imu_fusion():
                     dt=dt,
                 )
             else:
-                # Mode sans magnétomètre (IMU 6 axes)
-                q = fourati.update(
+                # Mode 6 axes (gyro + acc seulement)
+                # L'EKF peut fonctionner sans magnétomètre
+                q = ekf.update(
                     q=q,
                     gyr=gyr,
                     acc=acc,
-                    mag=np.array([1.0, 0.0, 0.0]),  # Magnétomètre fictif
                     dt=dt,
                 )
 
-            # Normalisation du quaternion
+            # Normalisation du quaternion (sécurité)
             q = q / np.linalg.norm(q)
 
             # Conversion en angles d'Euler (convention ZYX)
-            roll_f, pitch_f, yaw_f = quaternion_to_euler_zyx(q)
+            roll_ekf, pitch_ekf, yaw_ekf = quaternion_to_euler_zyx(q)
             
-            roll_f_deg  = math.degrees(roll_f)
-            pitch_f_deg = math.degrees(pitch_f)
-            yaw_f_deg   = math.degrees(yaw_f)
+            roll_ekf_deg  = math.degrees(roll_ekf)
+            pitch_ekf_deg = math.degrees(pitch_ekf)
+            yaw_ekf_deg   = math.degrees(yaw_ekf)
 
             # Envoi des données via stdout en JSON
             orientation_data = {
-                'roll': roll_f_deg,
-                'pitch': pitch_f_deg,
-                'yaw': yaw_f_deg,
+                'roll': roll_ekf_deg,
+                'pitch': pitch_ekf_deg,
+                'yaw': yaw_ekf_deg,
                 'roll_comp': data["roll_comp"],
                 'pitch_comp': data["pitch_comp"],
                 'dt': dt * 1000.0
@@ -235,7 +238,7 @@ def run_imu_fusion():
             # Log sur stderr
             print(
                 f"COMP R={data['roll_comp']:7.2f} P={data['pitch_comp']:7.2f} | "
-                f"FOURATI R={roll_f_deg:7.2f} P={pitch_f_deg:7.2f} Y={yaw_f_deg:7.2f} | "
+                f"EKF R={roll_ekf_deg:7.2f} P={pitch_ekf_deg:7.2f} Y={yaw_ekf_deg:7.2f} | "
                 f"dt={dt*1000:.1f}ms",
                 file=sys.stderr
             )
