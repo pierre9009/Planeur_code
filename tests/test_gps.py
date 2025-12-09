@@ -5,7 +5,7 @@ import RPi.GPIO as GPIO
 PORT = "/dev/serial0"
 BAUDRATE = 9600
 
-EN_PIN = 17
+EN_PIN = 11
 
 
 GPIO.setmode(GPIO.BCM)
