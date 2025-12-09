@@ -5,3 +5,4 @@ pandas
 ahrs
 flask
 flask-socketio
+pynmea2
