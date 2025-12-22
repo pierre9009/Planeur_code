@@ -45,7 +45,7 @@ def run_imu_fusion():
     print("="*70, file=sys.stderr)
 
     init_acc = np.array([avg_ax, avg_ay, avg_az], dtype=float)
-    init_g_body = -init_acc
+    init_g_body = init_acc
 
     q0 = acc2q(init_g_body)
 
@@ -76,7 +76,7 @@ def run_imu_fusion():
 
             acc = np.array([m["ax"], m["ay"], m["az"]], dtype=float)
 
-            g_body = -acc # forces qui s'appliquent sont l'oppose de ce qui est mesure
+            g_body = acc # forces qui s'appliquent sont l'oppose de ce qui est mesure
 
             gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)
             mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
@@ -84,7 +84,7 @@ def run_imu_fusion():
 
             # EKF
             print(q.shape,acc.shape, gyr.shape, mag.shape, file=sys.stderr)
-            q = ekf.update(q, gyr, g_body, mag, dt=dt)
+            q = ekf.update(q, gyr, g_body)
 
             rotation = R.from_quat([q[1], q[2], q[3], q[0]])
             euler_angles = rotation.as_euler('zyx', degrees=True)
