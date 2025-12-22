@@ -82,7 +82,7 @@ def run_imu_fusion():
             mag = mag*1000 # conversion uT -> nT
 
             # EKF
-            print(acc.shape, gyr.shape, mag.shape, file=sys.stderr)
+            print(q.shape,acc.shape, gyr.shape, mag.shape, file=sys.stderr)
             q = ekf.update(q, gyr, g_body, mag, dt=dt)
 
             rotation = R.from_quat([q[1], q[2], q[3], q[0]])
