@@ -8,6 +8,8 @@ import sys
 SYNC1 = 0xAA
 SYNC2 = 0x55
 
+#python imu_logger.py --rx-gpio 24 -b 57600 -o imu0.log --show
+
 FMT = "<I10fH"
 PKT_SIZE = struct.calcsize(FMT)
 
@@ -139,4 +141,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-#python imu_logger.py --rx-gpio 24 -b 57600 -o imu0.log --show

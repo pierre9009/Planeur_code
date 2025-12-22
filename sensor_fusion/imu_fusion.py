@@ -1,225 +1,142 @@
-"""
-Fusion IMU avec Extended Kalman Filter (EKF) - Bibliothèque AHRS
-
-Ce script lit les données IMU calibrées depuis l'Arduino (BMX160) via UART
-et estime l'orientation 3D en utilisant un filtre EKF.
-
-Format des données reçues (Arduino):
-- D,roll_comp,pitch_comp,gx,gy,gz,ax,ay,az,mx,my,mz
-- Gyroscope: deg/s (converti en rad/s ici)
-- Accéléromètre: m/s² (déjà calibré)
-- Magnétomètre: µT (converti en mT et normalisé)
-
-Référence AHRS EKF:
-- La méthode update() prend: update(q_prev, gyr, acc) pour mode 6 axes
-- Pour mode 9 axes (MARG), l'EKF attend acc et mag concaténés en un seul vecteur
-- Doc: https://ahrs.readthedocs.io/en/latest/filters/ekf.html
-"""
-
-import serial
+#!/usr/bin/env python3
 import time
 import math
-import numpy as np
 import json
 import sys
+import numpy as np
 
 from ahrs.filters import EKF
 from ahrs.common.orientation import acc2q
 
-
-def parse_packet(line: str):
-    """Parse une ligne de données IMU au format CSV."""
-    try:
-        if not line.startswith("D,"):
-            return None
-        parts = line.strip().split(",")
-        if len(parts) != 12:
-            return None
-        return {
-            "roll_comp":  float(parts[1]),
-            "pitch_comp": float(parts[2]),
-            "gx_deg":     float(parts[3]),
-            "gy_deg":     float(parts[4]),
-            "gz_deg":     float(parts[5]),
-            "ax":         float(parts[6]),
-            "ay":         float(parts[7]),
-            "az":         float(parts[8]),
-            "mx":         float(parts[9]),
-            "my":         float(parts[10]),
-            "mz":         float(parts[11]),
-        }
-    except ValueError:
-        return None
-
+from imu_api import ImuSoftUart
 
 def quaternion_to_euler_zyx(q):
-    """
-    Convertit un quaternion [w, x, y, z] en angles d'Euler (roll, pitch, yaw).
-    Convention ZYX (Yaw-Pitch-Roll) intrinsèque.
-    """
     w, x, y, z = q[0], q[1], q[2], q[3]
-    
-    # Roll (rotation autour de X)
+
     sinr_cosp = 2.0 * (w * x + y * z)
     cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
     roll = math.atan2(sinr_cosp, cosr_cosp)
-    
-    # Pitch (rotation autour de Y)
+
     sinp = 2.0 * (w * y - z * x)
     if abs(sinp) >= 1:
-        pitch = math.copysign(math.pi / 2, sinp)  # Gimbal lock
+        pitch = math.copysign(math.pi / 2, sinp)
     else:
         pitch = math.asin(sinp)
-    
-    # Yaw (rotation autour de Z)
+
     siny_cosp = 2.0 * (w * z + x * y)
     cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
     yaw = math.atan2(siny_cosp, cosy_cosp)
-    
+
     return roll, pitch, yaw
 
+def acc_to_roll_pitch_deg(ax, ay, az):
+    roll = math.atan2(ay, az)
+    pitch = math.atan2(-ax, math.sqrt(ay*ay + az*az))
+    return math.degrees(roll), math.degrees(pitch)
 
 def run_imu_fusion():
-    """Processus principal de fusion IMU avec EKF."""
-    
-    # Ouverture port série
-    ser = serial.Serial(port="/dev/serial0", baudrate=230400, timeout=1.0)
-    time.sleep(0.2)
-    
+    rx_gpio = 24
+    baud = 57600
+    imu = ImuSoftUart(rx_gpio=rx_gpio, baudrate=baud)
+    imu.open()
+
     print("="*70, file=sys.stderr)
-    print("INITIALISATION - Placez le capteur À PLAT", file=sys.stderr)
+    print("INITIALISATION - Placez le capteur A PLAT", file=sys.stderr)
     print("="*70, file=sys.stderr)
 
-    # Nettoyer le buffer et collecter des échantillons
-    time.sleep(1)
-    for _ in range(10):
-        ser.readline()
-    
-    diag_samples = []
-    for _ in range(30):
-        line = ser.readline().decode(errors="ignore").strip()
-        data = parse_packet(line)
-        if data:
-            diag_samples.append(data)
-    
-    if not diag_samples:
-        print("ERREUR: Pas de données reçues!", file=sys.stderr)
+    diag = []
+    t_start = time.time()
+    while len(diag) < 30 and (time.time() - t_start) < 5.0:
+        m = imu.read_measurement(timeout_s=0.5)
+        if m is None:
+            continue
+        diag.append(m)
+
+    if not diag:
+        print("ERREUR: Pas de donnees IMU", file=sys.stderr)
+        imu.close()
         return
 
-    # Calcul moyennes pour déterminer l'orientation initiale
-    avg_ax = np.mean([d["ax"] for d in diag_samples])
-    avg_ay = np.mean([d["ay"] for d in diag_samples])
-    avg_az = np.mean([d["az"] for d in diag_samples])
-    
-    print(f"Accéléromètre: X={avg_ax:.2f} Y={avg_ay:.2f} Z={avg_az:.2f} m/s²", file=sys.stderr)
-    
-    # Déterminer si Z pointe vers le haut ou le bas
+    avg_ax = float(np.mean([d["ax"] for d in diag]))
+    avg_ay = float(np.mean([d["ay"] for d in diag]))
+    avg_az = float(np.mean([d["az"] for d in diag]))
+
+    print(f"Acc: X={avg_ax:.3f} Y={avg_ay:.3f} Z={avg_az:.3f} m/s^2", file=sys.stderr)
     z_sign = 1 if avg_az > 0 else -1
     print(f"Z pointe vers le {'HAUT' if z_sign > 0 else 'BAS'}", file=sys.stderr)
     print("="*70, file=sys.stderr)
 
-    # Configuration EKF
-    # frame='NED' car Z pointe vers le bas dans la convention aéronautique
-    # noises = [var_gyro, var_acc, var_mag] - variances du bruit de mesure
     ekf = EKF(
-        frequency=50.0,
-        frame='NED',
-        noises=[0.3**2, 0.5**2, 0.8**2],  # Ajustez selon votre capteur
+        frequency=100.0,
+        frame="NED",
+        noises=[0.3**2, 0.5**2, 0.8**2],
     )
 
-    # Quaternion initial depuis l'accéléromètre
-    init_acc = np.array([avg_ax, avg_ay, avg_az * z_sign])
-    init_acc = init_acc / np.linalg.norm(init_acc)
+    init_acc = np.array([avg_ax, avg_ay, avg_az * z_sign], dtype=float)
+    init_acc = init_acc / (np.linalg.norm(init_acc) + 1e-12)
     q = acc2q(init_acc)
-    q = q / np.linalg.norm(q)
-    
-    roll, pitch, yaw = quaternion_to_euler_zyx(q)
-    print(f"Orientation initiale: R={math.degrees(roll):.1f}° P={math.degrees(pitch):.1f}° Y={math.degrees(yaw):.1f}°", file=sys.stderr)
-    print("Démarrage de l'EKF...\n", file=sys.stderr)
+    q = q / (np.linalg.norm(q) + 1e-12)
+
+    r0, p0, y0 = quaternion_to_euler_zyx(q)
+    print(
+        f"Orientation initiale: R={math.degrees(r0):.1f} P={math.degrees(p0):.1f} Y={math.degrees(y0):.1f}",
+        file=sys.stderr
+    )
+    print("Demarrage EKF...\n", file=sys.stderr)
 
     last_t = time.time()
 
-    # Boucle principale
-    while True:
-        try:
-            line = ser.readline().decode(errors="ignore").strip()
-            if not line:
+    try:
+        while True:
+            m = imu.read_measurement(timeout_s=1.0)
+            if m is None:
                 continue
 
-            # Calcul dt
             now = time.time()
             dt = now - last_t
             if dt <= 0.0:
-                dt = 0.02  # 50 Hz par défaut
+                dt = 0.01
             last_t = now
 
-            data = parse_packet(line)
-            if data is None:
-                continue
+            gyr = np.array([m["gx"], m["gy"], m["gz"] * z_sign], dtype=float)
 
-            # Gyroscope: deg/s → rad/s
-            gyr = np.array([
-                data["gx_deg"] * math.pi / 180.0,
-                data["gy_deg"] * math.pi / 180.0,
-                data["gz_deg"] * math.pi / 180.0 * z_sign
-            ], dtype=float)
-
-            # Accéléromètre: m/s² (normalisé)
-            acc = np.array([data["ax"], data["ay"], data["az"] * z_sign], dtype=float)
+            acc = np.array([m["ax"], m["ay"], m["az"] * z_sign], dtype=float)
             acc_norm = np.linalg.norm(acc)
             if acc_norm < 0.1:
                 continue
-            acc = acc / acc_norm
+            acc_unit = acc / acc_norm
 
-            # Magnétomètre: µT → mT (normalisé)
-            mag = np.array([data["mx"], data["my"], data["mz"] * z_sign], dtype=float) / 1000.0
-            mag_norm = np.linalg.norm(mag)
-            if mag_norm > 0.001:
-                mag = mag / mag_norm
-            else:
-                mag = None
+            q = ekf.update(q, gyr, acc_unit)
+            q = q / (np.linalg.norm(q) + 1e-12)
 
-            # Mise à jour EKF
-            # IMPORTANT: L'EKF de AHRS ne supporte PAS le magnétomètre en 3ème argument
-            # Il faut utiliser mode 6 axes (gyro + acc uniquement)
-            # Pour mode 9 axes, il faudrait concaténer acc et mag en un seul vecteur
-            # Signature: update(q_prev, gyr, acc)
-            q = ekf.update(q, gyr, acc)
-            
-            # Normalisation du quaternion
-            q = q / np.linalg.norm(q)
-
-            # Conversion en angles d'Euler
             roll, pitch, yaw = quaternion_to_euler_zyx(q)
-            roll_deg  = math.degrees(roll)
+            roll_deg = math.degrees(roll)
             pitch_deg = math.degrees(pitch)
-            yaw_deg   = math.degrees(yaw)
+            yaw_deg = math.degrees(yaw)
 
-            # Envoi JSON sur stdout (pour le serveur web)
+            roll_comp, pitch_comp = acc_to_roll_pitch_deg(m["ax"], m["ay"], m["az"])
+
             orientation_data = {
-                'roll': roll_deg,
-                'pitch': pitch_deg,
-                'yaw': yaw_deg,
-                'roll_comp': data["roll_comp"],
-                'pitch_comp': data["pitch_comp"],
-                'dt': dt * 1000.0
+                "roll": roll_deg,
+                "pitch": pitch_deg,
+                "yaw": yaw_deg,
+                "roll_comp": roll_comp,
+                "pitch_comp": pitch_comp,
+                "dt": dt * 1000.0,
             }
             print(json.dumps(orientation_data), flush=True)
 
-            # Log sur stderr
             print(
-                f"COMP R={data['roll_comp']:6.1f} P={data['pitch_comp']:6.1f} | "
-                f"EKF R={roll_deg:6.1f} P={pitch_deg:6.1f} Y={yaw_deg:6.1f} | "
-                f"{dt*1000:.0f}ms",
+                f"ACC  R={roll_comp:6.1f} P={pitch_comp:6.1f} | "
+                f"EKF  R={roll_deg:6.1f} P={pitch_deg:6.1f} Y={yaw_deg:6.1f} | "
+                f"{dt*1000:.0f}ms  crc_bad={imu.bad_crc}/{imu.total}",
                 file=sys.stderr
             )
 
-        except KeyboardInterrupt:
-            print("\nArrêt demandé", file=sys.stderr)
-            break
-        except Exception as e:
-            print(f"Erreur: {e}", file=sys.stderr)
+    except KeyboardInterrupt:
+        print("\nArret demande", file=sys.stderr)
+    finally:
+        imu.close()
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_imu_fusion()

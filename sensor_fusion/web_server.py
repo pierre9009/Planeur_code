@@ -18,7 +18,7 @@ def imu_reader_thread():
     try:
         # Lancer le processus de fusion IMU
         process = subprocess.Popen(
-            ['python', 'imu_fusion.py'],
+            ['python3', 'imu_fusion.py'],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             bufsize=1,
