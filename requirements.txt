@@ -6,3 +6,5 @@ ahrs
 flask
 flask-socketio
 pynmea2
+pigpio
+setuptools

@@ -10,5 +10,8 @@ sudo raspi-config
 
 sudo apt-get install python3-pip
 
-pip install requirements.txt
+pip install -r requirements.txt
+
 https://github.com/mikoff/imu-calib
+
+https://abyz.me.uk/rpi/pigpio/download.html
