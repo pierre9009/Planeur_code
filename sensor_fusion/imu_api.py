@@ -96,9 +96,9 @@ class ImuSoftUart:
                 seq, ax, ay, az, gx, gy, gz, mx, my, mz, tempC, _ = struct.unpack(FMT, payload)
                 return {
                     "seq": int(seq),
-                    "ax": float(ax), "ay": float(ay), "az": float(az),
-                    "gx": float(gx), "gy": float(gy), "gz": float(gz),
-                    "mx": float(mx), "my": float(my), "mz": float(mz),
+                    "ax": float(ax), "ay": float(ay), "az": float(az), # m/s²
+                    "gx": float(gx), "gy": float(gy), "gz": float(gz), #rad/s
+                    "mx": float(mx), "my": float(my), "mz": float(mz), #uT
                     "tempC": float(tempC),
                     "ts": time.time(),
                 }
