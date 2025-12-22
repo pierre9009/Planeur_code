@@ -52,6 +52,7 @@ def run_imu_fusion():
     ekf = EKF(
         frequency=100.0,
         frame="NED",
+        magnetic_ref=60.0,
         noises=[0.3**2, 0.5**2, 0.8**2],
         q0=q0
     )
