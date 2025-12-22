@@ -98,6 +98,7 @@ class ImuSoftUart:
                     "seq": int(seq),
                     "ax": float(ax), "ay": float(ay), "az": float(az),
                     "gx": float(gx), "gy": float(gy), "gz": float(gz),
+                    "mx": float(mx), "my": float(my), "mz": float(mz),
                     "tempC": float(tempC),
                     "ts": time.time(),
                 }
