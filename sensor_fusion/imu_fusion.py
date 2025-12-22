@@ -114,24 +114,18 @@ def run_imu_fusion():
                 dt = 0.01
             last_t = now
 
-            ax_b, ay_b, az_b, gx_b, gy_b, gz_b = remap_imu(
-                m["ax"], m["ay"], m["az"],
-                m["gx"], m["gy"], m["gz"]
-            )
-
-            # Acc normalisé pour EKF
-            acc = np.array([ax_b, ay_b, az_b], dtype=float)
+            acc = np.array([m["ax"], m["ay"], m["az"]], dtype=float)
             acc_norm = np.linalg.norm(acc)
-            if acc_norm < 0.1:
+            if acc_norm < 1e-6:
                 continue
-            acc_unit = acc / acc_norm
+            g_body = -acc / acc_norm
 
-            # Gyro pour EKF
-            gyr = np.array([gx_b, gy_b, gz_b], dtype=float)
+            gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)
+
 
 
             # EKF
-            q = ekf.update(q, gyr, acc_unit)
+            q = ekf.update(q, gyr, g_body)
             q = q / (np.linalg.norm(q) + 1e-12)
 
             roll, pitch, yaw = quaternion_to_euler_zyx(q)
@@ -139,7 +133,7 @@ def run_imu_fusion():
             pitch_deg = math.degrees(pitch)
             yaw_deg = math.degrees(yaw)
 
-            roll_comp, pitch_comp = acc_to_roll_pitch_deg_body(ax_b, ay_b, az_b)
+            roll_comp, pitch_comp = acc_to_roll_pitch_deg(g_body[0], g_body[1], g_body[2])
 
             orientation_data = {
                 "roll": roll_deg,
