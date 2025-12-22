@@ -55,6 +55,7 @@ def run_imu_fusion():
         noises=[0.3**2, 0.5**2, 0.8**2],
         q0=q0
     )
+    q=q0
 
     print("Demarrage EKF...\n", file=sys.stderr)
 

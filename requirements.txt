@@ -8,3 +8,4 @@ flask-socketio
 pynmea2
 pigpio
 setuptools
+scipy
