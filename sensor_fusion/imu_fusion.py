@@ -29,10 +29,23 @@ def quaternion_to_euler_zyx(q):
 
     return roll, pitch, yaw
 
-def acc_to_roll_pitch_deg(ax, ay, az):
+def remap_imu(ax, ay, az, gx, gy, gz):
+    # Rotation de 90° autour de Z (cas le plus courant quand roll/pitch sont croisés)
+    # Ajuste si besoin (voir plus bas)
+    ax_b = ay
+    ay_b = -ax
+    az_b = az
+
+    gx_b = gy
+    gy_b = -gx
+    gz_b = gz
+    return ax_b, ay_b, az_b, gx_b, gy_b, gz_b
+
+def acc_to_roll_pitch_deg_body(ax, ay, az):
     roll = math.atan2(ay, az)
     pitch = math.atan2(-ax, math.sqrt(ay*ay + az*az))
     return math.degrees(roll), math.degrees(pitch)
+
 
 def run_imu_fusion():
     rx_gpio = 24
@@ -72,7 +85,10 @@ def run_imu_fusion():
         noises=[0.3**2, 0.5**2, 0.8**2],
     )
 
-    init_acc = np.array([avg_ax, avg_ay, avg_az * z_sign], dtype=float)
+    init_acc = np.array([avg_ax, avg_ay, avg_az], dtype=float)
+    ax_b, ay_b, az_b, *_ = remap_imu(avg_ax, avg_ay, avg_az, 0.0, 0.0, 0.0)
+
+    init_acc = np.array([ax_b, ay_b, az_b], dtype=float)
     init_acc = init_acc / (np.linalg.norm(init_acc) + 1e-12)
     q = acc2q(init_acc)
     q = q / (np.linalg.norm(q) + 1e-12)
@@ -98,14 +114,23 @@ def run_imu_fusion():
                 dt = 0.01
             last_t = now
 
-            gyr = np.array([m["gx"], m["gy"], m["gz"] * z_sign], dtype=float)
+            ax_b, ay_b, az_b, gx_b, gy_b, gz_b = remap_imu(
+                m["ax"], m["ay"], m["az"],
+                m["gx"], m["gy"], m["gz"]
+            )
 
-            acc = np.array([m["ax"], m["ay"], m["az"] * z_sign], dtype=float)
+            # Acc normalisé pour EKF
+            acc = np.array([ax_b, ay_b, az_b], dtype=float)
             acc_norm = np.linalg.norm(acc)
             if acc_norm < 0.1:
                 continue
             acc_unit = acc / acc_norm
 
+            # Gyro pour EKF
+            gyr = np.array([gx_b, gy_b, gz_b], dtype=float)
+
+
+            # EKF
             q = ekf.update(q, gyr, acc_unit)
             q = q / (np.linalg.norm(q) + 1e-12)
 
@@ -114,7 +139,7 @@ def run_imu_fusion():
             pitch_deg = math.degrees(pitch)
             yaw_deg = math.degrees(yaw)
 
-            roll_comp, pitch_comp = acc_to_roll_pitch_deg(m["ax"], m["ay"], m["az"])
+            roll_comp, pitch_comp = acc_to_roll_pitch_deg_body(ax_b, ay_b, az_b)
 
             orientation_data = {
                 "roll": roll_deg,
