@@ -2,7 +2,7 @@ import time
 import struct
 import pigpio
 
-RX_GPIO = 23
+RX_GPIO = 24
 BAUD = 115200
 
 SYNC1 = 0xAA
