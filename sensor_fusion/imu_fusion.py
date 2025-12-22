@@ -1,78 +1,94 @@
-# ... imports ...
+#!/usr/bin/env python3
+import time
+import json
+import sys
+import numpy as np
+from scipy.spatial.transform import Rotation as R
 
 from ahrs.filters import EKF
-from scipy.spatial.transform import Rotation as R
-import numpy as np
-import time, json, sys
 from imu_api import ImuSoftUart
 
-G = 9.80665
-
+# ------------------------------------------------------------
+# Quaternion helpers
+# ------------------------------------------------------------
 def q_wxyz_to_xyzw(q):
     return np.array([q[1], q[2], q[3], q[0]], dtype=float)
 
 def q_xyzw_to_wxyz(q):
     return np.array([q[3], q[0], q[1], q[2]], dtype=float)
 
-def init_q0_from_acc_only(ax, ay, az):
-    # Roll/pitch depuis l'acc (yaw = 0)
-    # Convention standard: acc mesure environ +g sur l’axe “down” quand c’est à plat
+# ------------------------------------------------------------
+# Initial attitude from ACC + MAG (tilt compensated yaw)
+# ------------------------------------------------------------
+def init_q0_from_acc_mag(acc, mag):
+    ax, ay, az = acc
+    mx, my, mz = mag
+
+    # Roll / Pitch from accelerometer
     roll  = np.arctan2(ay, az)
     pitch = np.arctan2(-ax, np.sqrt(ay*ay + az*az))
-    rot = R.from_euler('yx', [pitch, roll], degrees=False)  # yaw=0
-    q_xyzw = rot.as_quat()
-    return q_xyzw_to_wxyz(q_xyzw)
 
+    # Tilt compensated magnetometer
+    cr = np.cos(roll)
+    sr = np.sin(roll)
+    cp = np.cos(pitch)
+    sp = np.sin(pitch)
+
+    mx2 = mx * cp + mz * sp
+    my2 = mx * sr * sp + my * cr - mz * sr * cp
+    yaw = np.arctan2(-my2, mx2)
+
+    rot = R.from_euler('zyx', [yaw, pitch, roll], degrees=False)
+    return q_xyzw_to_wxyz(rot.as_quat())
+
+# ------------------------------------------------------------
+# Main fusion loop
+# ------------------------------------------------------------
 def run_imu_fusion():
     imu = ImuSoftUart(rx_gpio=24, baudrate=57600)
     imu.open()
 
-    diag = []
+    # -------------------------
+    # Collect init samples
+    # -------------------------
+    samples = []
     t0 = time.time()
-    while len(diag) < 30 and (time.time() - t0) < 5.0:
+    while len(samples) < 40 and (time.time() - t0) < 5.0:
         m = imu.read_measurement(timeout_s=0.5)
         if m is not None:
-            diag.append(m)
+            samples.append(m)
 
-    if not diag:
+    if not samples:
         print("ERREUR: Pas de donnees IMU", file=sys.stderr)
         imu.close()
         return
 
-    avg_ax = float(np.mean([d["ax"] for d in diag]))
-    avg_ay = float(np.mean([d["ay"] for d in diag]))
-    avg_az = float(np.mean([d["az"] for d in diag]))
+    acc0 = np.mean([[s["ax"], s["ay"], s["az"]] for s in samples], axis=0)
+    mag0 = np.mean([[s["mx"], s["my"], s["mz"]] for s in samples], axis=0) * 1000.0
 
-    avg_mx = float(np.mean([d["mx"] for d in diag]))
-    avg_my = float(np.mean([d["my"] for d in diag]))
-    avg_mz = float(np.mean([d["mz"] for d in diag]))
+    print(f"ACC init: {acc0}", file=sys.stderr)
+    print(f"MAG init (nT): {mag0}", file=sys.stderr)
 
-    print(f"Acc: X={avg_ax:.3f} Y={avg_ay:.3f} Z={avg_az:.3f} m/s^2", file=sys.stderr)
-    print(f"Mag: X={avg_mx:.2f} Y={avg_my:.2f} Z={avg_mz:.2f} uT", file=sys.stderr)
+    q0 = init_q0_from_acc_mag(acc0, mag0)
 
-    q0 = init_q0_from_acc_only(avg_ax, avg_ay, avg_az)
-
-    # IMPORTANT: forcer l’EKF en mode 6D en donnant mag à la construction
-    mag0_nt = np.array([[avg_mx*1000.0, avg_my*1000.0, avg_mz*1000.0]], dtype=float)  # uT -> nT
-    acc0 = np.array([[avg_ax, avg_ay, avg_az]], dtype=float)
-    gyr0 = np.zeros((1, 3), dtype=float)
-
+    # -------------------------
+    # EKF initialisation (FORCÉ EN 6D)
+    # -------------------------
     ekf = EKF(
-        gyr=gyr0,
-        acc=acc0,
-        mag=mag0_nt,
+        gyr=np.zeros((1, 3)),
+        acc=acc0.reshape(1, 3),
+        mag=mag0.reshape(1, 3),
         frequency=100.0,
         frame="NED",
         q0=q0,
-        noises=[0.3**2, 0.5**2, 0.8**2],
-        mag_ref=60.0,
-        magnetic_ref=60.0,
+        magnetic_ref=60.0,     # dip angle OK pour prototype
+        noises=[0.01, 0.1, 0.5]
     )
 
     q = q0
     last_t = time.time()
 
-    print("Demarrage EKF...", file=sys.stderr)
+    print("EKF démarré", file=sys.stderr)
 
     try:
         while True:
@@ -82,25 +98,24 @@ def run_imu_fusion():
 
             now = time.time()
             dt = now - last_t
+            last_t = now
             if dt <= 0.0:
                 dt = 0.01
-            last_t = now
 
             acc = np.array([m["ax"], m["ay"], m["az"]], dtype=float)
             gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)
-            mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float) * 1000.0  # uT -> nT
+            mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float) * 1000.0
 
-            # Ici: la doc demande acc en m/s^2, mag en nT, gyr en rad/s
             q = ekf.update(q, gyr, acc, mag, dt=dt)
 
             rot = R.from_quat(q_wxyz_to_xyzw(q))
-            yaw_deg, pitch_deg, roll_deg = rot.as_euler('zyx', degrees=True)
+            yaw, pitch, roll = rot.as_euler('zyx', degrees=True)
 
             print(json.dumps({
-                "roll": float(roll_deg),
-                "pitch": float(pitch_deg),
-                "yaw": float(yaw_deg),
-                "dt": float(dt*1000.0),
+                "roll": float(roll),
+                "pitch": float(pitch),
+                "yaw": float(yaw),
+                "dt": float(dt * 1000.0),
             }), flush=True)
 
     finally:
