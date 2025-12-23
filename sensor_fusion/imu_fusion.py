@@ -168,6 +168,8 @@ def run_imu_fusion():
 
             q = ekf.update(q, gyr, acc, mag, dt=dt)
 
+            roll, pitch, yaw = quaternion_to_euler_direct(q)
+            
             roll_deg = np.rad2deg(roll)
             pitch_deg = np.rad2deg(pitch)
             yaw_mag_deg = np.rad2deg(yaw)
