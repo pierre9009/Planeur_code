@@ -1,11 +1,7 @@
 pyserial
 numpy
-matplotlib
-pandas
 ahrs
 flask
 flask-socketio
-pynmea2
 pigpio
-setuptools
 scipy
