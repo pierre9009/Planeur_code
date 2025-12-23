@@ -181,28 +181,20 @@
         scene.add(pointLight);
         
         // ========================================================================
-        // CRÉATION DE L'AVION EN CONVENTION NED
-        // ========================================================================
-        // Dans NED: X=Nord(forward), Y=Est(right), Z=Bas(down)
-        // Dans Three.js: X=right, Y=up, Z=toward_viewer
-        // 
-        // Pour avoir l'avion orienté "nez vers +X NED" dans Three.js:
-        // - Le nez de l'avion doit pointer vers +Z Three.js
-        // - L'aile droite vers +X Three.js
-        // - Le bas vers -Y Three.js
+        // CRÉATION DE L'AVION
+        // L'avion pointe vers +Z (Nord) au repos
         // ========================================================================
         
         const planeGroup = new THREE.Group();
         
-        // Fuselage (cylindre le long de l'axe longitudinal)
+        // Fuselage (cylindre le long de Z)
         const fuselageGeometry = new THREE.CylinderGeometry(0.3, 0.3, 3, 16);
         const fuselageMaterial = new THREE.MeshPhongMaterial({ 
             color: 0x4a90e2,
             shininess: 100
         });
         const fuselage = new THREE.Mesh(fuselageGeometry, fuselageMaterial);
-        // Rotation pour aligner le cylindre avec l'axe Z (nez vers +Z)
-        fuselage.rotation.x = Math.PI / 2;
+        fuselage.rotation.x = Math.PI / 2; // Horizontal le long de Z
         fuselage.castShadow = true;
         planeGroup.add(fuselage);
         
@@ -235,7 +227,7 @@
         tailHoriz.castShadow = true;
         planeGroup.add(tailHoriz);
         
-        // Nez
+        // Nez rouge pour identification
         const noseGeometry = new THREE.SphereGeometry(0.3, 16, 16);
         const noseMaterial = new THREE.MeshPhongMaterial({ 
             color: 0xe74c3c,
@@ -259,35 +251,16 @@
         axesHelper.position.y = -1.8;
         scene.add(axesHelper);
         
-        // Indicateur de Nord (flèche rouge pointant vers +Z)
+        // Indicateur de Nord (flèche cyan vers +Z)
         const arrowHelper = new THREE.ArrowHelper(
-            new THREE.Vector3(0, 0, 1),  // Direction +Z
-            new THREE.Vector3(0, -1.8, 0),  // Position
-            2,  // Longueur
-            0xff0000,  // Couleur rouge
-            0.5,  // Longueur de la tête
-            0.3   // Largeur de la tête
+            new THREE.Vector3(0, 0, 1),
+            new THREE.Vector3(0, -1.8, 0),
+            2,
+            0x00ffff,
+            0.5,
+            0.3
         );
         scene.add(arrowHelper);
-        
-        // Texte "NORD" (simulé avec un plan)
-        const canvas = document.createElement('canvas');
-        canvas.width = 128;
-        canvas.height = 64;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = 'red';
-        ctx.font = 'bold 40px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('N', 64, 45);
-        
-        const texture = new THREE.Texture(canvas);
-        texture.needsUpdate = true;
-        const northLabel = new THREE.Mesh(
-            new THREE.PlaneGeometry(0.5, 0.25),
-            new THREE.MeshBasicMaterial({ map: texture, transparent: true })
-        );
-        northLabel.position.set(0, -1.5, 2.5);
-        scene.add(northLabel);
         
         // WebSocket
         const socket = io();
@@ -306,26 +279,30 @@
         
         socket.on('orientation_update', (data) => {
             // ================================================================
-            // TRANSFORMATION NED → THREE.JS
+            // MAPPING CORRECT DES ROTATIONS
             // ================================================================
-            // NED (IMU):     X=Nord, Y=Est, Z=Bas
-            // Three.js:      X=Droite, Y=Haut, Z=Vers observateur
+            // Convention NED → Three.js (avion pointant vers +Z):
+            // 
+            // Roll NED (roulis)   → rotation.z (rotation autour de l'axe Z)
+            // Pitch NED (tangage) → rotation.x (rotation autour de l'axe X)
+            // Yaw NED (lacet)     → rotation.y (rotation autour de l'axe Y)
             //
-            // Mapping des rotations:
-            // - Roll NED (rotation autour X-Nord) → Rotation autour Z Three.js
-            // - Pitch NED (rotation autour Y-Est) → Rotation autour X Three.js (inversé)
-            // - Yaw NED (rotation autour Z-Bas) → Rotation autour Y Three.js (inversé)
+            // IMPORTANT: Les données Python sont déjà en convention NED
+            // avec les bons noms (roll, pitch, yaw)
             // ================================================================
             
             const roll_rad = data.roll * Math.PI / 180;
             const pitch_rad = data.pitch * Math.PI / 180;
             const yaw_rad = data.yaw * Math.PI / 180;
             
-            // Application des rotations en ordre ZXY (équivalent à YXZ en NED)
+            // Application correcte des rotations
+            // L'ordre n'a pas d'importance selon vos tests, mais on utilise YXZ
             planeGroup.rotation.order = 'YXZ';
-            planeGroup.rotation.x = -pitch_rad;  // Pitch inversé
-            planeGroup.rotation.y = -yaw_rad;    // Yaw inversé
-            planeGroup.rotation.z = roll_rad;    // Roll direct
+            
+            // MAPPING CORRECT:
+            planeGroup.rotation.x = pitch_rad;  // Pitch → rotation X (tangage)
+            planeGroup.rotation.y = yaw_rad;    // Yaw → rotation Y (lacet)
+            planeGroup.rotation.z = roll_rad;   // Roll → rotation Z (roulis)
             
             // Mise à jour de l'affichage
             document.getElementById('roll-value').textContent = data.roll.toFixed(2) + '°';
@@ -345,6 +322,9 @@
                 const freq = 1000.0 / dt_ms;
                 document.getElementById('freq-value').textContent = freq.toFixed(1) + ' Hz';
             }
+            
+            // Debug dans la console
+            console.log(`Roll: ${data.roll.toFixed(1)}°, Pitch: ${data.pitch.toFixed(1)}°, Yaw: ${data.yaw.toFixed(1)}°`);
         });
         
         // Animation
