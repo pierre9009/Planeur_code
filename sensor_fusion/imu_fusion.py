@@ -24,6 +24,29 @@ def q_wxyz_to_xyzw(q):
 def q_xyzw_to_wxyz(q):
     return np.array([q[3], q[0], q[1], q[2]], dtype=float)
 
+def quaternion_to_euler_direct(q):
+    """
+    Extraction directe des angles d'Euler depuis un quaternion [w,x,y,z].
+    Convention aéronautique ZYX (yaw-pitch-roll).
+    
+    Cette méthode évite les ambiguïtés de scipy.
+    """
+    w, x, y, z = q[0], q[1], q[2], q[3]
+    
+    # Roll (φ): rotation autour de X
+    roll = np.arctan2(2.0 * (w*x + y*z), 1.0 - 2.0 * (x*x + y*y))
+    
+    # Pitch (θ): rotation autour de Y
+    sin_pitch = 2.0 * (w*y - z*x)
+    # Clamp pour éviter les erreurs numériques
+    sin_pitch = np.clip(sin_pitch, -1.0, 1.0)
+    pitch = np.arcsin(sin_pitch)
+    
+    # Yaw (ψ): rotation autour de Z
+    yaw = np.arctan2(2.0 * (w*z + x*y), 1.0 - 2.0 * (y*y + z*z))
+    
+    return roll, pitch, yaw
+
 # ------------------------------------------------------------
 # Initial attitude from ACC + MAG (tilt compensated yaw)
 # ------------------------------------------------------------
@@ -94,6 +117,21 @@ def run_imu_fusion():
     r0, p0, y0 = rot0.as_euler('ZYX', degrees=True)
     print(f"  Orientation initiale: Roll={r0:.1f}°, Pitch={p0:.1f}°, Yaw={y0:.1f}°", file=sys.stderr)
 
+    # Bruits (écarts-types) cohérents avec ICM-20948 (ordre de grandeur)
+    sigma_g = 8.3e-4   # rad/s  (ex: BW ~ 10 Hz)
+    sigma_a = 7.1e-3   # m/s^2  (ex: BW ~ 10 Hz)
+    sigma_m = 0.8*0.8  # default librarie
+
+    # Référence du champ magnétique en NED (recommandé si l'API l'accepte)
+    I = np.deg2rad(MAG_INCLINATION)
+    D = np.deg2rad(MAG_DECLINATION)
+    F = MAG_INTENSITY
+    mag_ref_ned = np.array([
+        F*np.cos(I)*np.cos(D),   # North
+        F*np.cos(I)*np.sin(D),   # East
+        F*np.sin(I)              # Down
+    ], dtype=float)
+
     # -------------------------
     # EKF initialisation
     # -------------------------
@@ -103,9 +141,8 @@ def run_imu_fusion():
         mag=mag0.reshape(1, 3),
         frequency=100.0,
         frame="NED",
-        q0=q0,
-        magnetic_ref=MAG_INCLINATION,  # Angle d'inclinaison magnétique (DIP)
-        noises=[0.01, 0.1, 0.5]
+        magnetic_ref=mag_ref_ned,  # Angle d'inclinaison magnétique (DIP)
+        noises=[sigma_g, sigma_a, sigma_m]
     )
 
     q = q0
@@ -131,19 +168,16 @@ def run_imu_fusion():
 
             q = ekf.update(q, gyr, acc, mag, dt=dt)
 
-            # Extraction des angles d'Euler selon la convention ZYX
-            rot = R.from_quat(q_wxyz_to_xyzw(q))
-            # IMPORTANT: as_euler('ZYX') retourne [yaw, pitch, roll] dans cet ordre
-            yaw, pitch, roll = rot.as_euler('ZYX', degrees=True)
-
-            # Correction de la déclinaison magnétique pour le yaw
-            yaw_true = yaw + MAG_DECLINATION
+            roll_deg = np.rad2deg(roll)
+            pitch_deg = np.rad2deg(pitch)
+            yaw_mag_deg = np.rad2deg(yaw)
+            yaw_true_deg = yaw_mag_deg + MAG_DECLINATION
 
             print(json.dumps({
-                "roll": float(roll),
-                "pitch": float(pitch),
-                "yaw": float(yaw_true),  # Yaw corrigé avec la déclinaison
-                "yaw_mag": float(yaw),   # Yaw magnétique (sans correction)
+                "roll": float(roll_deg),
+                "pitch": float(pitch_deg),
+                "yaw": float(yaw_true_deg),      # Yaw géographique (nord vrai)
+                "yaw_mag": float(yaw_mag_deg),   # Yaw magnétique
                 "dt": float(dt * 1000.0),
             }), flush=True)
 

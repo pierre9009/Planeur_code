@@ -12,8 +12,8 @@ After=network.target
 
 [Service]
 Type=forking
-ExecStart=/usr/bin/pigpiod
-ExecStop=/usr/bin/pigpiod -k
+ExecStart=/usr/local/bin/pigpiod
+ExecStop=/usr/local/bin/pigpiod -k
 Restart=always
 
 [Install]
