@@ -261,9 +261,11 @@
             
             // CORRECTION CRITIQUE: Ordre correct pour Three.js avec Euler ZYX
             // Three.js utilise la convention: rotation.x = pitch, rotation.y = yaw, rotation.z = roll
-            planeGroup.rotation.x = pitch;   // Rotation autour de X (tangage)
-            planeGroup.rotation.y = yaw;     // Rotation autour de Y (lacet)
-            planeGroup.rotation.z = roll;    // Rotation autour de Z (roulis)
+            planeGroup.rotation.order = 'ZYX';
+
+            planeGroup.rotation.x = roll;   // Rotation autour de X (tangage)
+            planeGroup.rotation.y = pitch;     // Rotation autour de Y (lacet)
+            planeGroup.rotation.z = yaw;    // Rotation autour de Z (roulis)
             
             // Mise à jour de l'affichage
             document.getElementById('roll-value').textContent = data.roll.toFixed(2) + '°';
