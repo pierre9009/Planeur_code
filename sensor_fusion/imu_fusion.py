@@ -15,7 +15,8 @@ from imu_api import ImuSoftUart
 # https://www.magnetic-declination.com/
 MAG_DECLINATION = 2.7  # degrés (EAST positive)
 MAG_INCLINATION = 60.2  # degrés (DIP angle)
-MAG_INTENSITY = 47147.4  # nT (47.1474 µT converti)
+MAG_INTENSITY = 30.76  # uT
+MAG_INTENSITY *= 1000.0  # Convertir en nT
 
 # ------------------------------------------------------------
 # Quaternion helpers
