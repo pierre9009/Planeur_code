@@ -1,143 +1,206 @@
 #!/usr/bin/env python3
-import argparse
-import struct
 import time
-import pigpio
+import json
 import sys
+import numpy as np
+from scipy.spatial.transform import Rotation as R
 
-SYNC1 = 0xAA
-SYNC2 = 0x55
+from ahrs.filters import EKF
+from imu_api import ImuSoftUart
 
-#python logging-imu-calib.py --rx-gpio 24 -b 57600 -o imu0.log --show
+# ------------------------------------------------------------
+# Configuration magnétique locale
+# ------------------------------------------------------------
 
-FMT = "<I10fH"
-PKT_SIZE = struct.calcsize(FMT)
+# https://www.magnetic-declination.com/
+MAG_DECLINATION = 2.7  # degrés (EAST positive)
+MAG_INCLINATION = 60.2  # degrés (DIP angle)
+MAG_INTENSITY = 47147.4  # nT (47.1474 µT converti)
 
-def crc16_ccitt(data: bytes, init: int = 0xFFFF) -> int:
-    crc = init
-    for b in data:
-        crc ^= (b << 8) & 0xFFFF
-        for _ in range(8):
-            if crc & 0x8000:
-                crc = ((crc << 1) ^ 0x1021) & 0xFFFF
-            else:
-                crc = (crc << 1) & 0xFFFF
-    return crc
+# ------------------------------------------------------------
+# Quaternion helpers
+# ------------------------------------------------------------
+def q_wxyz_to_xyzw(q):
+    return np.array([q[1], q[2], q[3], q[0]], dtype=float)
 
-def parse_args():
-    p = argparse.ArgumentParser(
-        description="Logger IMU binaire (UART soft pigpio) vers .log imu-calib"
+def q_xyzw_to_wxyz(q):
+    return np.array([q[3], q[0], q[1], q[2]], dtype=float)
+
+def quaternion_to_euler_direct(q):
+    """
+    Extraction directe des angles d'Euler depuis un quaternion [w,x,y,z].
+    Convention aéronautique ZYX (yaw-pitch-roll).
+    
+    Cette méthode évite les ambiguïtés de scipy.
+    """
+    w, x, y, z = q[0], q[1], q[2], q[3]
+    
+    # Roll (φ): rotation autour de X
+    roll = np.arctan2(2.0 * (w*x + y*z), 1.0 - 2.0 * (x*x + y*y))
+    
+    # Pitch (θ): rotation autour de Y
+    sin_pitch = 2.0 * (w*y - z*x)
+    # Clamp pour éviter les erreurs numériques
+    sin_pitch = np.clip(sin_pitch, -1.0, 1.0)
+    pitch = np.arcsin(sin_pitch)
+    
+    # Yaw (ψ): rotation autour de Z
+    yaw = np.arctan2(2.0 * (w*z + x*y), 1.0 - 2.0 * (y*y + z*z))
+    
+    return roll, pitch, yaw
+
+# ------------------------------------------------------------
+# Initial attitude from ACC + MAG (tilt compensated yaw)
+# ------------------------------------------------------------
+def init_q0_from_acc_mag(acc, mag):
+    ax, ay, az = acc
+    mx, my, mz = mag
+
+    # Roll / Pitch from accelerometer
+    roll  = np.arctan2(ay, az)
+    pitch = np.arctan2(-ax, np.sqrt(ay*ay + az*az))
+
+    # Tilt compensated magnetometer
+    cr = np.cos(roll)
+    sr = np.sin(roll)
+    cp = np.cos(pitch)
+    sp = np.sin(pitch)
+
+    mx2 = mx * cp + mz * sp
+    my2 = mx * sr * sp + my * cr - mz * sr * cp
+    yaw = np.arctan2(-my2, mx2)
+
+    # Séquence ZYX: rotation autour de Z (yaw), puis Y (pitch), puis X (roll)
+    rot = R.from_euler('ZYX', [yaw, pitch, roll], degrees=False)
+    return q_xyzw_to_wxyz(rot.as_quat())
+
+# ------------------------------------------------------------
+# Main fusion loop
+# ------------------------------------------------------------
+def run_imu_fusion():
+    imu = ImuSoftUart(rx_gpio=24, baudrate=57600)
+    imu.open()
+
+    # -------------------------
+    # Collect init samples
+    # -------------------------
+    samples = []
+    t0 = time.time()
+    print("Collecte des échantillons d'initialisation...", file=sys.stderr)
+    
+    while len(samples) < 40 and (time.time() - t0) < 5.0:
+        m = imu.read_measurement(timeout_s=0.5)
+        if m is not None:
+            samples.append(m)
+            if len(samples) % 10 == 0:
+                print(f"  {len(samples)}/40 échantillons", file=sys.stderr)
+
+    if not samples:
+        print("ERREUR: Pas de données IMU", file=sys.stderr)
+        imu.close()
+        return
+
+    acc0 = np.mean([[s["ax"], s["ay"], s["az"]] for s in samples], axis=0)
+    
+    # CORRECTION: Conversion µT → nT
+    mag0_uT = np.mean([[s["mx"], s["my"], s["mz"]] for s in samples], axis=0)
+    mag0 = mag0_uT * 1000.0  # Conversion µT → nT
+
+    print(f"\nInitialisation:", file=sys.stderr)
+    print(f"  ACC: [{acc0[0]:.3f}, {acc0[1]:.3f}, {acc0[2]:.3f}] m/s²", file=sys.stderr)
+    print(f"  MAG: [{mag0_uT[0]:.2f}, {mag0_uT[1]:.2f}, {mag0_uT[2]:.2f}] µT", file=sys.stderr)
+    print(f"  MAG: [{mag0[0]:.1f}, {mag0[1]:.1f}, {mag0[2]:.1f}] nT", file=sys.stderr)
+    
+    mag_measured = np.linalg.norm(mag0)
+    print(f"  Intensité magnétique mesurée: {mag_measured:.1f} nT ({mag_measured/1000:.2f} µT)", file=sys.stderr)
+    print(f"  Intensité magnétique attendue: {MAG_INTENSITY:.1f} nT ({MAG_INTENSITY/1000:.2f} µT)", file=sys.stderr)
+    print(f"  Écart: {abs(mag_measured - MAG_INTENSITY):.1f} nT", file=sys.stderr)
+
+    # Initialisation avec les valeurs en nT
+    q0 = init_q0_from_acc_mag(acc0, mag0)
+    
+    # Afficher l'orientation initiale
+    rot0 = R.from_quat(q_wxyz_to_xyzw(q0))
+    r0, p0, y0 = rot0.as_euler('ZYX', degrees=True)
+    print(f"  Orientation initiale: Roll={r0:.1f}°, Pitch={p0:.1f}°, Yaw={y0:.1f}°", file=sys.stderr)
+
+    # Bruits (écarts-types) cohérents avec ICM-20948
+    sigma_g = 8.3e-4   # rad/s
+    sigma_a = 7.1e-3   # m/s²
+    sigma_m = 800.0    # nT (0.8 µT converti en nT)
+
+    # Référence du champ magnétique en NED (en nT)
+    I = np.deg2rad(MAG_INCLINATION)
+    D = np.deg2rad(MAG_DECLINATION)
+    F = MAG_INTENSITY  # déjà en nT
+    
+    mag_ref_ned = np.array([
+        F * np.cos(I) * np.cos(D),   # North
+        F * np.cos(I) * np.sin(D),   # East
+        F * np.sin(I)                # Down
+    ], dtype=float)
+    
+    print(f"  Référence magnétique NED: [{mag_ref_ned[0]:.1f}, {mag_ref_ned[1]:.1f}, {mag_ref_ned[2]:.1f}] nT", file=sys.stderr)
+
+    # -------------------------
+    # EKF initialisation
+    # -------------------------
+    ekf = EKF(
+        gyr=np.zeros((1, 3)),
+        acc=acc0.reshape(1, 3),
+        mag=mag0.reshape(1, 3),  # En nT maintenant
+        frequency=100.0,
+        frame="NED",
+        magnetic_ref=mag_ref_ned,
+        noises=[sigma_g, sigma_a, sigma_m]
     )
-    p.add_argument(
-        "--rx-gpio", type=int, default=24,
-        help="GPIO BCM pour RX UART soft (defaut: 24)"
-    )
-    p.add_argument(
-        "-b", "--baudrate", type=int, default=57600,
-        help="Baudrate UART (defaut: 57600)"
-    )
-    p.add_argument(
-        "-o", "--output", default="imu0.log",
-        help="Fichier .log de sortie (defaut: imu0.log)"
-    )
-    p.add_argument(
-        "--show", action="store_true",
-        help="Afficher aussi les valeurs sur le terminal"
-    )
-    return p.parse_args()
 
-def main():
-    args = parse_args()
+    q = q0
+    last_t = time.time()
 
-    pi = pigpio.pi()
-    if not pi.connected:
-        print("Erreur: pigpiod non actif")
-        sys.exit(1)
-
-    RX_GPIO = args.rx_gpio
-
-    pi.set_mode(RX_GPIO, pigpio.INPUT)
-    pi.set_pull_up_down(RX_GPIO, pigpio.PUD_OFF)
+    print("\n✓ EKF démarré - Envoi des données...\n", file=sys.stderr)
 
     try:
-        pi.bb_serial_read_close(RX_GPIO)
-    except pigpio.error:
-        pass
+        while True:
+            m = imu.read_measurement(timeout_s=1.0)
+            if m is None:
+                continue
 
-    rc = pi.bb_serial_read_open(RX_GPIO, args.baudrate, 8)
-    if rc != 0:
-        print(f"Erreur ouverture UART soft rc={rc}")
-        pi.stop()
-        sys.exit(1)
+            now = time.time()
+            dt = now - last_t
+            last_t = now
+            if dt <= 0.0:
+                dt = 0.01
 
-    pi.bb_serial_read(RX_GPIO)  # flush
+            acc = np.array([m["ax"], m["ay"], m["az"]], dtype=float)
+            gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)
+            
+            # CORRECTION: Conversion µT → nT
+            mag_uT = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
+            mag = mag_uT * 1000.0  # Conversion µT → nT
 
-    print(f"Logging IMU sur GPIO{RX_GPIO} @ {args.baudrate} bauds")
-    print(f"Fichier: {args.output}")
-    print("Ctrl+C pour arreter")
+            q = ekf.update(q, gyr, acc, mag, dt=dt)
 
-    buf = bytearray()
-    frames = 0
-    bad = 0
+            roll, pitch, yaw = quaternion_to_euler_direct(q)
+            
+            roll_deg = np.rad2deg(roll)
+            pitch_deg = np.rad2deg(pitch)
+            yaw_deg = np.rad2deg(yaw)
+            
+            # CORRECTION: La déclinaison est déjà dans mag_ref_ned
+            # Le yaw retourné est déjà le nord vrai (géographique)
+            # Si vous voulez le nord magnétique, il faut SOUSTRAIRE la déclinaison
 
-    with open(args.output, "w") as f:
-        try:
-            while True:
-                count, data = pi.bb_serial_read(RX_GPIO)
-                if count > 0:
-                    buf.extend(data)
+            print(json.dumps({
+                "roll": float(roll_deg),
+                "pitch": float(pitch_deg),
+                "yaw": float(yaw_deg),           # Yaw géographique (nord vrai)
+                "yaw_mag": float(yaw_deg - MAG_DECLINATION),  # Yaw magnétique
+                "dt": float(dt * 1000.0),
+            }), flush=True)
 
-                    while True:
-                        idx = buf.find(bytes([SYNC1, SYNC2]))
-                        if idx < 0:
-                            if len(buf) > 1:
-                                buf[:] = buf[-1:]
-                            break
-
-                        if idx > 0:
-                            del buf[:idx]
-
-                        if len(buf) < 2 + PKT_SIZE:
-                            break
-
-                        payload = bytes(buf[2:2 + PKT_SIZE])
-                        del buf[:2 + PKT_SIZE]
-
-                        (
-                            seq,
-                            ax, ay, az,
-                            gx, gy, gz,
-                            *_,
-                            rx_crc
-                        ) = struct.unpack(FMT, payload)
-
-                        calc = crc16_ccitt(payload[:-2])
-                        if rx_crc != calc:
-                            bad += 1
-                            continue
-
-                        frames += 1
-
-                        # Format imu-calib: ax ay az gx gy gz
-                        f.write(f"{ax} {ay} {az} {gx} {gy} {gz}\n")
-
-                        if args.show:
-                            print(
-                                f"{frames:6d}  "
-                                f"{ax:+.6f} {ay:+.6f} {az:+.6f}  "
-                                f"{gx:+.6f} {gy:+.6f} {gz:+.6f}"
-                            )
-
-                time.sleep(0.001)
-
-        except KeyboardInterrupt:
-            print("\nArret utilisateur")
-
-    pi.bb_serial_read_close(RX_GPIO)
-    pi.stop()
-
-    print(f"Log termine: {frames} trames OK, {bad} trames CRC ignorees")
+    finally:
+        imu.close()
 
 if __name__ == "__main__":
-    main()
-
+    run_imu_fusion()

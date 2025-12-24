@@ -23,6 +23,8 @@ pip install -r requirements.txt
 chmod +x install_pigpiod_service.sh
 ./install_pigpiod_service.sh
 
+https://www.pjrc.com/store/prop_shield.html
+
 ---
 
 https://github.com/mikoff/imu-calib

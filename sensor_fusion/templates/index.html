@@ -51,7 +51,7 @@
             backdrop-filter: blur(10px);
             padding: 20px;
             border-radius: 10px;
-            min-width: 300px;
+            min-width: 280px;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
         }
         
@@ -88,15 +88,6 @@
         .disconnected {
             color: #f87171;
         }
-
-        .section-title {
-            font-size: 12px;
-            color: #718096;
-            margin-top: 15px;
-            margin-bottom: 5px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
     </style>
 </head>
 <body>
@@ -108,7 +99,6 @@
         <div id="canvas-container"></div>
         
         <div id="info-panel">
-            <div class="section-title">Orientation (Nord Géographique)</div>
             <div class="data-row">
                 <span class="label">Roll (Roulis):</span>
                 <span class="value" id="roll-value">0.00°</span>
@@ -121,23 +111,18 @@
                 <span class="label">Yaw (Lacet):</span>
                 <span class="value" id="yaw-value">0.00°</span>
             </div>
-            
-            <div class="section-title">Nord Magnétique</div>
             <div class="data-row">
-                <span class="label">Yaw Magnétique:</span>
-                <span class="value" id="yaw-mag-value">0.00°</span>
+                <span class="label">Roll Comp:</span>
+                <span class="value" id="roll-comp-value">0.00°</span>
             </div>
-            
-            <div class="section-title">Performances</div>
+            <div class="data-row">
+                <span class="label">Pitch Comp:</span>
+                <span class="value" id="pitch-comp-value">0.00°</span>
+            </div>
             <div class="data-row">
                 <span class="label">Δt:</span>
                 <span class="value" id="dt-value">0.00 ms</span>
             </div>
-            <div class="data-row">
-                <span class="label">Fréquence:</span>
-                <span class="value" id="freq-value">0 Hz</span>
-            </div>
-            
             <div class="status">
                 État: <span id="status" class="disconnected">Déconnecté</span>
             </div>
@@ -180,32 +165,34 @@
         pointLight.position.set(-5, 5, -5);
         scene.add(pointLight);
         
-        // ========================================================================
-        // CRÉATION DE L'AVION
-        // L'avion pointe vers +Z (Nord) au repos
-        // ========================================================================
-        
+        // Création de l'avion
         const planeGroup = new THREE.Group();
         
-        // Fuselage (cylindre le long de Z)
+        // Fuselage
         const fuselageGeometry = new THREE.CylinderGeometry(0.3, 0.3, 3, 16);
         const fuselageMaterial = new THREE.MeshPhongMaterial({ 
             color: 0x4a90e2,
             shininess: 100
         });
         const fuselage = new THREE.Mesh(fuselageGeometry, fuselageMaterial);
-        fuselage.rotation.x = Math.PI / 2; // Horizontal le long de Z
+        fuselage.rotation.z = Math.PI / 2;
         fuselage.castShadow = true;
         planeGroup.add(fuselage);
         
-        // Ailes (envergure le long de X)
-        const wingGeometry = new THREE.BoxGeometry(6, 0.1, 1);
+        // Ailes
+        // width = 1  -> axe X (corde)
+        // height = 0.1 -> épaisseur
+        // depth = 6 -> axe Z (envergure, perpendiculaire au fuselage)
+        const wingGeometry = new THREE.BoxGeometry(1, 0.1, 6);
         const wingMaterial = new THREE.MeshPhongMaterial({ 
             color: 0x5aa3e8,
             shininess: 80
         });
         const wings = new THREE.Mesh(wingGeometry, wingMaterial);
+
+        // On centre les ailes sur le fuselage
         wings.position.set(0, 0, 0);
+
         wings.castShadow = true;
         planeGroup.add(wings);
         
@@ -216,26 +203,26 @@
             shininess: 80
         });
         const tailVert = new THREE.Mesh(tailVertGeometry, tailMaterial);
-        tailVert.position.set(0, 0.5, -1.3);
+        tailVert.position.set(-1.3, 0.5, 0);
         tailVert.castShadow = true;
         planeGroup.add(tailVert);
         
         // Empennage horizontal
         const tailHorizGeometry = new THREE.BoxGeometry(2, 0.1, 0.6);
         const tailHoriz = new THREE.Mesh(tailHorizGeometry, tailMaterial);
-        tailHoriz.position.set(0, 0.8, -1.3);
+        tailHoriz.position.set(-1.3, 0.8, 0);
         tailHoriz.castShadow = true;
         planeGroup.add(tailHoriz);
         
-        // Nez rouge pour identification
+        // Nez
         const noseGeometry = new THREE.SphereGeometry(0.3, 16, 16);
         const noseMaterial = new THREE.MeshPhongMaterial({ 
             color: 0xe74c3c,
             shininess: 100
         });
         const nose = new THREE.Mesh(noseGeometry, noseMaterial);
-        nose.position.z = 1.5;
-        nose.scale.set(1, 1, 1.2);
+        nose.position.x = 1.5;
+        nose.scale.set(1.2, 1, 1);
         nose.castShadow = true;
         planeGroup.add(nose);
         
@@ -250,17 +237,6 @@
         const axesHelper = new THREE.AxesHelper(3);
         axesHelper.position.y = -1.8;
         scene.add(axesHelper);
-        
-        // Indicateur de Nord (flèche cyan vers +Z)
-        const arrowHelper = new THREE.ArrowHelper(
-            new THREE.Vector3(0, 0, 1),
-            new THREE.Vector3(0, -1.8, 0),
-            2,
-            0x00ffff,
-            0.5,
-            0.3
-        );
-        scene.add(arrowHelper);
         
         // WebSocket
         const socket = io();
@@ -278,53 +254,26 @@
         });
         
         socket.on('orientation_update', (data) => {
-            // ================================================================
-            // MAPPING CORRECT DES ROTATIONS
-            // ================================================================
-            // Convention NED → Three.js (avion pointant vers +Z):
-            // 
-            // Roll NED (roulis)   → rotation.z (rotation autour de l'axe Z)
-            // Pitch NED (tangage) → rotation.x (rotation autour de l'axe X)
-            // Yaw NED (lacet)     → rotation.y (rotation autour de l'axe Y)
-            //
-            // IMPORTANT: Les données Python sont déjà en convention NED
-            // avec les bons noms (roll, pitch, yaw)
-            // ================================================================
+            // Conversion degrés -> radians
+            const roll = data.roll * Math.PI / 180;
+            const pitch = data.pitch * Math.PI / 180;
+            const yaw = data.yaw * Math.PI / 180;
             
-            const roll_rad = data.roll * Math.PI / 180;
-            const pitch_rad = data.pitch * Math.PI / 180;
-            const yaw_rad = data.yaw * Math.PI / 180;
-            
-            // Application correcte des rotations
-            // L'ordre n'a pas d'importance selon vos tests, mais on utilise YXZ
-            planeGroup.rotation.order = 'YXZ';
-            
-            // MAPPING CORRECT:
-            planeGroup.rotation.x = pitch_rad;  // Pitch → rotation X (tangage)
-            planeGroup.rotation.y = yaw_rad;    // Yaw → rotation Y (lacet)
-            planeGroup.rotation.z = roll_rad;   // Roll → rotation Z (roulis)
+            // CORRECTION CRITIQUE: Ordre correct pour Three.js avec Euler ZYX
+            // Three.js utilise la convention: rotation.x = pitch, rotation.y = yaw, rotation.z = roll
+            planeGroup.rotation.order = 'ZYX';
+
+            planeGroup.rotation.x = roll;   // Rotation autour de X (tangage)
+            planeGroup.rotation.y = pitch;     // Rotation autour de Y (lacet)
+            planeGroup.rotation.z = yaw;    // Rotation autour de Z (roulis)
             
             // Mise à jour de l'affichage
             document.getElementById('roll-value').textContent = data.roll.toFixed(2) + '°';
             document.getElementById('pitch-value').textContent = data.pitch.toFixed(2) + '°';
             document.getElementById('yaw-value').textContent = data.yaw.toFixed(2) + '°';
-            
-            // Yaw magnétique (si disponible)
-            if (data.yaw_mag !== undefined) {
-                document.getElementById('yaw-mag-value').textContent = data.yaw_mag.toFixed(2) + '°';
-            }
-            
-            // Performance
-            const dt_ms = data.dt;
-            document.getElementById('dt-value').textContent = dt_ms.toFixed(2) + ' ms';
-            
-            if (dt_ms > 0) {
-                const freq = 1000.0 / dt_ms;
-                document.getElementById('freq-value').textContent = freq.toFixed(1) + ' Hz';
-            }
-            
-            // Debug dans la console
-            console.log(`Roll: ${data.roll.toFixed(1)}°, Pitch: ${data.pitch.toFixed(1)}°, Yaw: ${data.yaw.toFixed(1)}°`);
+            document.getElementById('roll-comp-value').textContent = data.roll_comp.toFixed(2) + '°';
+            document.getElementById('pitch-comp-value').textContent = data.pitch_comp.toFixed(2) + '°';
+            document.getElementById('dt-value').textContent = data.dt.toFixed(2) + ' ms';
         });
         
         // Animation

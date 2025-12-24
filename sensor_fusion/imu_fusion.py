@@ -9,11 +9,13 @@ from ahrs.filters import EKF
 from imu_api import ImuSoftUart
 
 # ------------------------------------------------------------
-# Configuration magnétique locale (Faucon, France)
+# Configuration magnétique locale
 # ------------------------------------------------------------
+
+# https://www.magnetic-declination.com/
 MAG_DECLINATION = 2.7  # degrés (EAST positive)
-MAG_INCLINATION = 60.18  # degrés (DIP angle)
-MAG_INTENSITY = 47.1453  # µT (47145.3 nT)
+MAG_INCLINATION = 60.2  # degrés (DIP angle)
+MAG_INTENSITY = 47147.4  # nT (47.1474 µT converti)
 
 # ------------------------------------------------------------
 # Quaternion helpers
@@ -99,17 +101,22 @@ def run_imu_fusion():
         return
 
     acc0 = np.mean([[s["ax"], s["ay"], s["az"]] for s in samples], axis=0)
-    mag0 = np.mean([[s["mx"], s["my"], s["mz"]] for s in samples], axis=0)
+    
+    # CORRECTION: Conversion µT → nT
+    mag0_uT = np.mean([[s["mx"], s["my"], s["mz"]] for s in samples], axis=0)
+    mag0 = mag0_uT * 1000.0  # Conversion µT → nT
 
     print(f"\nInitialisation:", file=sys.stderr)
     print(f"  ACC: [{acc0[0]:.3f}, {acc0[1]:.3f}, {acc0[2]:.3f}] m/s²", file=sys.stderr)
-    print(f"  MAG: [{mag0[0]:.2f}, {mag0[1]:.2f}, {mag0[2]:.2f}] µT", file=sys.stderr)
+    print(f"  MAG: [{mag0_uT[0]:.2f}, {mag0_uT[1]:.2f}, {mag0_uT[2]:.2f}] µT", file=sys.stderr)
+    print(f"  MAG: [{mag0[0]:.1f}, {mag0[1]:.1f}, {mag0[2]:.1f}] nT", file=sys.stderr)
     
     mag_measured = np.linalg.norm(mag0)
-    print(f"  Intensité magnétique mesurée: {mag_measured:.2f} µT", file=sys.stderr)
-    print(f"  Intensité magnétique attendue: {MAG_INTENSITY:.2f} µT", file=sys.stderr)
-    print(f"  Écart: {abs(mag_measured - MAG_INTENSITY):.2f} µT", file=sys.stderr)
+    print(f"  Intensité magnétique mesurée: {mag_measured:.1f} nT ({mag_measured/1000:.2f} µT)", file=sys.stderr)
+    print(f"  Intensité magnétique attendue: {MAG_INTENSITY:.1f} nT ({MAG_INTENSITY/1000:.2f} µT)", file=sys.stderr)
+    print(f"  Écart: {abs(mag_measured - MAG_INTENSITY):.1f} nT", file=sys.stderr)
 
+    # Initialisation avec les valeurs en nT
     q0 = init_q0_from_acc_mag(acc0, mag0)
     
     # Afficher l'orientation initiale
@@ -117,20 +124,23 @@ def run_imu_fusion():
     r0, p0, y0 = rot0.as_euler('ZYX', degrees=True)
     print(f"  Orientation initiale: Roll={r0:.1f}°, Pitch={p0:.1f}°, Yaw={y0:.1f}°", file=sys.stderr)
 
-    # Bruits (écarts-types) cohérents avec ICM-20948 (ordre de grandeur)
-    sigma_g = 8.3e-4   # rad/s  (ex: BW ~ 10 Hz)
-    sigma_a = 7.1e-3   # m/s^2  (ex: BW ~ 10 Hz)
-    sigma_m = 0.8*0.8  # default librarie
+    # Bruits (écarts-types) cohérents avec ICM-20948
+    sigma_g = 8.3e-4   # rad/s
+    sigma_a = 7.1e-3   # m/s²
+    sigma_m = 800.0    # nT (0.8 µT converti en nT)
 
-    # Référence du champ magnétique en NED (recommandé si l'API l'accepte)
+    # Référence du champ magnétique en NED (en nT)
     I = np.deg2rad(MAG_INCLINATION)
     D = np.deg2rad(MAG_DECLINATION)
-    F = MAG_INTENSITY
+    F = MAG_INTENSITY  # déjà en nT
+    
     mag_ref_ned = np.array([
-        F*np.cos(I)*np.cos(D),   # North
-        F*np.cos(I)*np.sin(D),   # East
-        F*np.sin(I)              # Down
+        F * np.cos(I) * np.cos(D),   # North
+        F * np.cos(I) * np.sin(D),   # East
+        F * np.sin(I)                # Down
     ], dtype=float)
+    
+    print(f"  Référence magnétique NED: [{mag_ref_ned[0]:.1f}, {mag_ref_ned[1]:.1f}, {mag_ref_ned[2]:.1f}] nT", file=sys.stderr)
 
     # -------------------------
     # EKF initialisation
@@ -138,10 +148,10 @@ def run_imu_fusion():
     ekf = EKF(
         gyr=np.zeros((1, 3)),
         acc=acc0.reshape(1, 3),
-        mag=mag0.reshape(1, 3),
+        mag=mag0.reshape(1, 3),  # En nT maintenant
         frequency=100.0,
         frame="NED",
-        magnetic_ref=mag_ref_ned,  # Angle d'inclinaison magnétique (DIP)
+        magnetic_ref=mag_ref_ned,
         noises=[sigma_g, sigma_a, sigma_m]
     )
 
@@ -164,7 +174,10 @@ def run_imu_fusion():
 
             acc = np.array([m["ax"], m["ay"], m["az"]], dtype=float)
             gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)
-            mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
+            
+            # CORRECTION: Conversion µT → nT
+            mag_uT = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
+            mag = mag_uT * 1000.0  # Conversion µT → nT
 
             q = ekf.update(q, gyr, acc, mag, dt=dt)
 
@@ -172,14 +185,17 @@ def run_imu_fusion():
             
             roll_deg = np.rad2deg(roll)
             pitch_deg = np.rad2deg(pitch)
-            yaw_mag_deg = np.rad2deg(yaw)
-            yaw_true_deg = yaw_mag_deg + MAG_DECLINATION
+            yaw_deg = np.rad2deg(yaw)
+            
+            # CORRECTION: La déclinaison est déjà dans mag_ref_ned
+            # Le yaw retourné est déjà le nord vrai (géographique)
+            # Si vous voulez le nord magnétique, il faut SOUSTRAIRE la déclinaison
 
             print(json.dumps({
                 "roll": float(roll_deg),
                 "pitch": float(pitch_deg),
-                "yaw": float(yaw_true_deg),      # Yaw géographique (nord vrai)
-                "yaw_mag": float(yaw_mag_deg),   # Yaw magnétique
+                "yaw": float(yaw_deg),           # Yaw géographique (nord vrai)
+                "yaw_mag": float(yaw_deg - MAG_DECLINATION),  # Yaw magnétique
                 "dt": float(dt * 1000.0),
             }), flush=True)
 
