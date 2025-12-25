@@ -264,9 +264,9 @@
             // Le repère NED a Z vers le bas. Three.js a Y vers le haut.
             // On doit souvent réorganiser les axes. Une méthode simple :
             const qFinal = new THREE.Quaternion(
-                qRaw.y,   // X_3js <- Y_ned
-                -qRaw.z,   // Y_3js <- -Z_ned
-                qRaw.x,   // Z_3js <- X_ned
+                qRaw.x,   // X_3js <- Y_ned
+                qRaw.y,   // Y_3js <- -Z_ned
+                qRaw.z,   // Z_3js <- X_ned
                 qRaw.w
             );
 
