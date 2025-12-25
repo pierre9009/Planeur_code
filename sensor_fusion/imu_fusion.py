@@ -4,6 +4,7 @@ import json
 import sys
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+from ahrs.common.orientation import am2q
 
 from ahrs.filters import EKF
 from imu_api import ImuSoftUart
