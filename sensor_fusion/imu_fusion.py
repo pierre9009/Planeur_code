@@ -106,10 +106,10 @@ def run_imu_fusion():
     ekf = EKF(
         gyr=np.zeros((1, 3)),
         acc=acc0.reshape((1,3)),
-        mag=mag0.reshape((1,3)),
+#        mag=mag0.reshape((1,3)),
         frequency=100.0,
         frame="ENU",
-        magnetic_ref=mag_ref_ned,
+#        magnetic_ref=mag_ref_ned,
         noises=[sigma_g, sigma_a, sigma_m]
     )
 
@@ -134,7 +134,7 @@ def run_imu_fusion():
             gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)
             mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
 
-            q = ekf.update(q, gyr, acc, mag, dt=dt)
+            q = ekf.update(q, gyr, acc, dt=dt)
 
             roll, pitch, yaw = quaternion_to_euler_direct(q)
             
