@@ -259,8 +259,6 @@
             const pitch = data.pitch * Math.PI / 180;
             const yaw = data.yaw * Math.PI / 180;
             
-            // CORRECTION CRITIQUE: Ordre correct pour Three.js avec Euler ZYX
-            // Three.js utilise la convention: rotation.x = pitch, rotation.y = yaw, rotation.z = roll
             planeGroup.rotation.order = 'ZYX';
 
             planeGroup.rotation.x = roll;   // Rotation autour de X (tangage)
