@@ -25,22 +25,27 @@ def q_wxyz_to_xyzw(q):
 def q_xyzw_to_wxyz(q):
     return np.array([q[3], q[0], q[1], q[2]], dtype=float)
 
-def quaternion_to_euler_direct(q):
+#def quaternion_to_euler_direct(q):
     
-    w, x, y, z = q[0], q[1], q[2], q[3]
+#    w, x, y, z = q[0], q[1], q[2], q[3]
     
     # Roll (φ): rotation autour de X
-    roll = np.arctan2(2.0 * (w*x + y*z), (w*w + z*z - x*x - y*y))
+#    roll = np.arctan2(2.0 * (w*x + y*z), (w*w + z*z - x*x - y*y))
     
     # Pitch (θ): rotation autour de Y
-    sin_pitch = 2.0 * (w*y - x*z)
-    pitch = np.arcsin(sin_pitch)
+#    sin_pitch = 2.0 * (w*y - x*z)
+#    pitch = np.arcsin(sin_pitch)
     
     # Yaw (ψ): rotation autour de Z
-    yaw = np.arctan2(2.0 * (w*z + x*y), (w*w + x*x - y*y - z*z))
+#    yaw = np.arctan2(2.0 * (w*z + x*y), (w*w + x*x - y*y - z*z))
     
-    return roll, pitch, yaw
+#    return roll, pitch, yaw
 
+def quaternion_to_euler_direct(q):
+    q_scipy = [q[1], q[2], q[3], q[0]]
+    r = R.from_quat(q_scipy)
+    # On demande l'ordre aéronautique (Yaw, Pitch, Roll)
+    return r.as_euler('zyx', degrees=False)
 
 # ------------------------------------------------------------
 # Main fusion loop
@@ -150,6 +155,8 @@ def run_imu_fusion():
                 "pitch": float(pitch_deg),
                 "yaw": float(yaw_deg),           # Yaw géographique (nord vrai)
                 "yaw_mag": float(yaw_deg - MAG_DECLINATION),  # Yaw magnétique
+                "roll_comp": float(roll_deg), # Ajout pour éviter erreur JS
+                "pitch_comp": float(pitch_deg), # Ajout pour éviter erreur JS
                 "dt": float(dt * 1000.0),
             }), flush=True)
 

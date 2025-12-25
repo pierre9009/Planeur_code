@@ -260,6 +260,8 @@
             const yaw = data.yaw * Math.PI / 180;
             
             planeGroup.rotation.order = 'ZYX';
+            planeGroup.rotation.set(pitch, -yaw, roll, 'YXZ');
+            
 
             planeGroup.rotation.x = roll;   // Rotation autour de X (tangage)
             planeGroup.rotation.y = pitch;     // Rotation autour de Y (lacet)
