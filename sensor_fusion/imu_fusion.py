@@ -134,7 +134,7 @@ def run_imu_fusion():
             gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)
             mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
 
-            q = ekf.update(q, gyr, acc, dt=dt)
+            q = ekf.update(q, gyr, acc, mag, dt=dt)
             
             roll, pitch, yaw = quaternion_to_euler_direct(q)
 
