@@ -257,25 +257,26 @@
         });
         
         socket.on('orientation_update', (data) => {
-            // Conversion degrés -> radians
-            const roll = data.roll * Math.PI / 180;
-            const pitch = data.pitch * Math.PI / 180;
-            const yaw = data.yaw * Math.PI / 180;
-            
-            planeGroup.rotation.order = 'YXZ';
-            
+            // 1. Créer le quaternion à partir des données (Ordre Three.js : X, Y, Z, W)
+            const qRaw = new THREE.Quaternion(data.qx, data.qy, data.qz, data.qw);
 
-            planeGroup.rotation.x = roll;   // Rotation autour de X (tangage)
-            planeGroup.rotation.y = -yaw;     // Rotation autour de Y (lacet)
-            planeGroup.rotation.z = pitch;    // Rotation autour de Z (roulis)
-            
-            // Mise à jour de l'affichage
+            // 2. Correction du repère (NED vers Three.js)
+            // Le repère NED a Z vers le bas. Three.js a Y vers le haut.
+            // On doit souvent réorganiser les axes. Une méthode simple :
+            const qFinal = new THREE.Quaternion(
+                qRaw.y,   // X_3js <- Y_ned
+                -qRaw.z,   // Y_3js <- -Z_ned
+                qRaw.x,   // Z_3js <- X_ned
+                qRaw.w
+            );
+
+            // Appliquer le quaternion
+            planeGroup.quaternion.copy(qFinal);
+
+            // Mise à jour des textes
             document.getElementById('roll-value').textContent = data.roll.toFixed(2) + '°';
             document.getElementById('pitch-value').textContent = data.pitch.toFixed(2) + '°';
             document.getElementById('yaw-value').textContent = data.yaw.toFixed(2) + '°';
-            document.getElementById('roll-comp-value').textContent = data.roll_comp.toFixed(2) + '°';
-            document.getElementById('pitch-comp-value').textContent = data.pitch_comp.toFixed(2) + '°';
-            document.getElementById('dt-value').textContent = data.dt.toFixed(2) + ' ms';
         });
         
         // Animation

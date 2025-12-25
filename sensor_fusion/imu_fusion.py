@@ -108,7 +108,7 @@ def run_imu_fusion():
         acc=acc0.reshape((1,3)),
 #        mag=mag0.reshape((1,3)),
         frequency=100.0,
-        frame="ENU",
+        frame="NED",
 #        magnetic_ref=mag_ref_ned,
         noises=[sigma_g, sigma_a, sigma_m]
     )
@@ -135,21 +135,18 @@ def run_imu_fusion():
             mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
 
             q = ekf.update(q, gyr, acc, dt=dt)
-
+            
             roll, pitch, yaw = quaternion_to_euler_direct(q)
-            
-            roll_deg = np.rad2deg(roll)
-            pitch_deg = np.rad2deg(pitch)
-            yaw_deg = np.rad2deg(yaw)
-            
+
             print(json.dumps({
-                "roll": float(roll_deg),
-                "pitch": float(pitch_deg),
-                "yaw": float(yaw_deg),           # Yaw géographique (nord vrai)
-                "yaw_mag": float(yaw_deg - MAG_DECLINATION),  # Yaw magnétique
-                "roll_comp": float(roll_deg), # Ajout pour éviter erreur JS
-                "pitch_comp": float(pitch_deg), # Ajout pour éviter erreur JS
-                "dt": float(dt * 1000.0),
+                "qx": float(q[1]), # x
+                "qy": float(q[2]), # y
+                "qz": float(q[3]), # z
+                "qw": float(q[0]), # w (ahrs utilise w en premier)
+                "roll": float(np.rad2deg(roll)),
+                "pitch": float(np.rad2deg(pitch)),
+                "yaw": float(np.rad2deg(yaw)),
+                "dt": float(dt * 1000.0)
             }), flush=True)
 
     finally:
