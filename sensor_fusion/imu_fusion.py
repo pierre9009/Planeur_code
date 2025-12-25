@@ -87,7 +87,7 @@ def run_imu_fusion():
         F * np.sin(-I)               # Up (I est positif vers le bas, donc Up = -I)
     ])
     
-    print(f"  Référence magnétique NED: [{mag_ref_ned[0]:.1f}, {mag_ref_ned[1]:.1f}, {mag_ref_ned[2]:.1f}] uT", file=sys.stderr)
+    print(f"  Référence magnétique NED: [{mag_ref_enu[0]:.1f}, {mag_ref_enu[1]:.1f}, {mag_ref_enu[2]:.1f}] uT", file=sys.stderr)
 
     # -------------------------
     # EKF initialisation
