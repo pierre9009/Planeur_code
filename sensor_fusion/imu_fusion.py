@@ -106,10 +106,10 @@ def run_imu_fusion():
     ekf = EKF(
         gyr=np.zeros((1, 3)),
         acc=acc0.reshape((1,3)),
-#        mag=mag0.reshape((1,3)),
+        mag=mag0.reshape((1,3)),
         frequency=100.0,
-        frame="NED",
-#        magnetic_ref=mag_ref_ned,
+        frame="ENU",
+        magnetic_ref=mag_ref_ned,
         noises=[sigma_g, sigma_a, sigma_m]
     )
 
