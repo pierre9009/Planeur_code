@@ -227,6 +227,9 @@
         planeGroup.add(nose);
         
         scene.add(planeGroup);
+
+        const bodyAxes = new THREE.AxesHelper(5);
+        planeGroup.add(bodyAxes); // On ajoute les axes DIRECTEMENT sur l'avion
         
         // Grille de référence
         const gridHelper = new THREE.GridHelper(20, 20, 0x4a5568, 0x2d3748);
@@ -259,13 +262,12 @@
             const pitch = data.pitch * Math.PI / 180;
             const yaw = data.yaw * Math.PI / 180;
             
-            planeGroup.rotation.order = 'ZYX';
-            planeGroup.rotation.set(pitch, -yaw, roll, 'YXZ');
+            planeGroup.rotation.order = 'YXZ';
             
 
             planeGroup.rotation.x = roll;   // Rotation autour de X (tangage)
-            planeGroup.rotation.y = pitch;     // Rotation autour de Y (lacet)
-            planeGroup.rotation.z = yaw;    // Rotation autour de Z (roulis)
+            planeGroup.rotation.y = -yaw;     // Rotation autour de Y (lacet)
+            planeGroup.rotation.z = pitch;    // Rotation autour de Z (roulis)
             
             // Mise à jour de l'affichage
             document.getElementById('roll-value').textContent = data.roll.toFixed(2) + '°';

@@ -16,14 +16,6 @@ from imu_api import ImuSoftUart
 MAG_DECLINATION = 2.7  # degrés (EAST positive)
 MAG_INCLINATION = 60.2  # degrés (DIP angle)
 MAG_INTENSITY = 30.76  # uT
-# ------------------------------------------------------------
-# Quaternion helpers
-# ------------------------------------------------------------
-def q_wxyz_to_xyzw(q):
-    return np.array([q[1], q[2], q[3], q[0]], dtype=float)
-
-def q_xyzw_to_wxyz(q):
-    return np.array([q[3], q[0], q[1], q[2]], dtype=float)
 
 #def quaternion_to_euler_direct(q):
     
@@ -114,7 +106,7 @@ def run_imu_fusion():
     ekf = EKF(
         gyr=np.zeros((1, 3)),
         acc=acc0.reshape((1,3)),
-        mag=mag0.reshape((1,3)),  # En nT maintenant
+        mag=mag0.reshape((1,3)),
         frequency=100.0,
         frame="ENU",
         magnetic_ref=mag_ref_ned,
