@@ -132,9 +132,14 @@ def run_imu_fusion():
 
             acc = np.array([m["ax"], m["ay"], m["az"]], dtype=float)
             gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)
-            mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
+            # Correction basée sur la page 83 de la datasheet
+            mag_fixed = np.array([
+                m["mx"],    # X_mag = X_accel
+                -m["my"],   # Y_mag = -Y_accel (inversé)
+                -m["mz"]    # Z_mag = -Z_accel (inversé)
+            ])
 
-            q = ekf.update(q, gyr, acc, mag, dt=dt)
+            q = ekf.update(q, gyr, acc, mag_fixed, dt=dt)
             
             roll, pitch, yaw = quaternion_to_euler_direct(q)
 
