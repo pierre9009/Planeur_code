@@ -17,21 +17,6 @@ MAG_DECLINATION = 2.7  # degrés (EAST positive)
 MAG_INCLINATION = 60.2  # degrés (DIP angle)
 MAG_INTENSITY = 30.76  # uT
 
-#def quaternion_to_euler_direct(q):
-    
-#    w, x, y, z = q[0], q[1], q[2], q[3]
-    
-    # Roll (φ): rotation autour de X
-#    roll = np.arctan2(2.0 * (w*x + y*z), (w*w + z*z - x*x - y*y))
-    
-    # Pitch (θ): rotation autour de Y
-#    sin_pitch = 2.0 * (w*y - x*z)
-#    pitch = np.arcsin(sin_pitch)
-    
-    # Yaw (ψ): rotation autour de Z
-#    yaw = np.arctan2(2.0 * (w*z + x*y), (w*w + x*x - y*y - z*z))
-    
-#    return roll, pitch, yaw
 
 def quaternion_to_euler_direct(q):
     q_scipy = [q[1], q[2], q[3], q[0]]
@@ -66,7 +51,8 @@ def run_imu_fusion():
         return
 
     acc0 = np.mean([[s["ax"], s["ay"], s["az"]] for s in samples], axis=0)
-    mag0 = np.mean([[s["mx"], s["my"], s["mz"]] for s in samples], axis=0)
+    mag_raw0 = np.mean([[s["mx"], s["my"], s["mz"]] for s in samples], axis=0)
+    mag0 = np.array([mag_raw0[0], -mag_raw0[1], -mag_raw0[2]])
 
     print(f"\nInitialisation:", file=sys.stderr)
     print(f"  ACC: [{acc0[0]:.3f}, {acc0[1]:.3f}, {acc0[2]:.3f}] m/s²", file=sys.stderr)
@@ -80,23 +66,25 @@ def run_imu_fusion():
     # -------------------------
     # Initial orientation
     # -------------------------
-    q0 = np.array([1, 0, 0, 0], dtype=float) # w,x,y,z  on suppose que le capteur a plat
+    q0 = am2q(acc0, mag0, frame='ENU')
+    print(f"✓ Orientation initiale calculée: {q0}", file=sys.stderr)
 
     # Bruits 
-    sigma_g = 0.1**2
-    sigma_a = 0.3**2
-    sigma_m = 0.5**2
+    sigma_g = 0.01
+    sigma_a = 0.2
+    sigma_m = 0.5
 
     # Référence du champ magnétique en NED
     I = np.deg2rad(MAG_INCLINATION)
     D = np.deg2rad(MAG_DECLINATION)
     F = MAG_INTENSITY
     
-    mag_ref_ned = np.array([
-        F * np.cos(I) * np.cos(D),   # North
+    # En ENU: X=East, Y=North, Z=Up
+    mag_ref_enu = np.array([
         F * np.cos(I) * np.sin(D),   # East
-        F * np.sin(I)                # Down
-    ], dtype=float)
+        F * np.cos(I) * np.cos(D),   # North
+        F * np.sin(-I)               # Up (I est positif vers le bas, donc Up = -I)
+    ])
     
     print(f"  Référence magnétique NED: [{mag_ref_ned[0]:.1f}, {mag_ref_ned[1]:.1f}, {mag_ref_ned[2]:.1f}] uT", file=sys.stderr)
 
@@ -109,8 +97,8 @@ def run_imu_fusion():
         mag=mag0.reshape((1,3)),
         frequency=100.0,
         frame="ENU",
-        magnetic_ref=mag_ref_ned,
-        noises=[sigma_g, sigma_a, sigma_m]
+        magnetic_ref=mag_ref_enu,
+        noises=[sigma_g, sigma_a, sigma_m] # Bruits ajustés pour plus de stabilité
     )
 
     q = q0
@@ -132,12 +120,9 @@ def run_imu_fusion():
 
             acc = np.array([m["ax"], m["ay"], m["az"]], dtype=float)
             gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)
-            # Correction basée sur la page 83 de la datasheet
-            mag_fixed = np.array([
-                m["mx"],    # X_mag = X_accel
-                -m["my"],   # Y_mag = -Y_accel (inversé)
-                -m["mz"]    # Z_mag = -Z_accel (inversé)
-            ])
+
+            #[cite_start]Correction Magnéto (Page 83) [cite: 2456, 2472]
+            mag_fixed = np.array([m["mx"], -m["my"], -m["mz"]])
 
             q = ekf.update(q, gyr, acc, mag_fixed, dt=dt)
             
