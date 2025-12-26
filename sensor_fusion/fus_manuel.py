@@ -19,7 +19,7 @@ def run_imu_fusion():
                         f"A=({m["ax"]:+.3f}, {m["ay"]:+.3f}, {m["az"]:+.3f}) m/s² | "
                         f"G=({m["gx"]:+.3f}, {m["gy"]:+.3f}, {m["gz"]:+.3f}) rad/s | "
                         f"M=({m["mx"]:+.2f}, {m["my"]:+.2f}, {m["mz"]:+.2f}) uT | "
-                        f"T={m["TempC"]:.2f} C"
+                        f"T={m["tempC"]:.2f} C"
                     )
 
     finally:
