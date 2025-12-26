@@ -52,8 +52,7 @@ def run_imu_fusion():
         return
 
     acc0 = np.mean([[s["ax"], s["ay"], s["az"]] for s in samples], axis=0)
-    mag_raw0 = np.mean([[s["mx"], s["my"], s["mz"]] for s in samples], axis=0)
-    mag0 = np.array([mag_raw0[0], -mag_raw0[1], -mag_raw0[2]])
+    mag0 = np.mean([[s["mx"], s["my"], s["mz"]] for s in samples], axis=0)
 
     print(f"\nInitialisation:", file=sys.stderr)
     print(f"  ACC: [{acc0[0]:.3f}, {acc0[1]:.3f}, {acc0[2]:.3f}] m/s²", file=sys.stderr)
@@ -121,11 +120,9 @@ def run_imu_fusion():
 
             acc = np.array([m["ax"], m["ay"], m["az"]], dtype=float)
             gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)
+            mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
 
-            #[cite_start]Correction Magnéto (Page 83) [cite: 2456, 2472]
-            mag_fixed = np.array([m["mx"], -m["my"], -m["mz"]])
-
-            q = ekf.update(q, gyr, acc, mag_fixed, dt=dt)
+            q = ekf.update(q, gyr, acc, mag, dt=dt)
             
             roll, pitch, yaw = quaternion_to_euler_direct(q)
 
