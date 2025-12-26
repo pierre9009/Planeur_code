@@ -72,7 +72,7 @@ def run_imu_fusion():
     # Bruits 
     sigma_g = 0.01
     sigma_a = 0.2
-    sigma_m = 0.5
+    sigma_m = 5.0
 
     # Référence du champ magnétique en NED
     I = np.deg2rad(MAG_INCLINATION)
