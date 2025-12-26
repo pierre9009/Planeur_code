@@ -33,6 +33,7 @@ def run_imu_fusion():
     # Récupération des premières valeurs pour l'orientation initiale
     acc0 = np.mean([[s["ax"], s["ay"], s["az"]] for s in samples], axis=0)
     mag0 = np.mean([[s["mx"], s["my"], s["mz"]] for s in samples], axis=0)
+    mag0 = mag0/1000
 
     # 2. Initialisation du filtre de Fourati
     # On passe l'inclinaison magnétique (magnetic_dip)
@@ -59,9 +60,10 @@ def run_imu_fusion():
 
             # Préparation des données
             acc = np.array([m["ax"], m["ay"], m["az"]])
-            # On retire le biais du gyro
+
             gyr = np.array([m["gx"], m["gy"], m["gz"]])
             mag = np.array([m["mx"], m["my"], m["mz"]])
+            mag = mag/1000
 
             # --- MISE À JOUR FOURATI ---
             # L'algorithme update prend q_prec, gyr, acc, mag et dt
