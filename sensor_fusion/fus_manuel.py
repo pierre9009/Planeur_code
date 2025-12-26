@@ -30,9 +30,6 @@ def run_imu_fusion():
         m = imu.read_measurement(timeout_s=0.5)
         if m: samples.append(m)
     
-    # Calcul du biais moyen du gyroscope
-    gyro_bias = np.mean([[s["gx"], s["gy"], s["gz"]] for s in samples], axis=0)
-    
     # Récupération des premières valeurs pour l'orientation initiale
     acc0 = np.mean([[s["ax"], s["ay"], s["az"]] for s in samples], axis=0)
     mag0 = np.mean([[s["mx"], s["my"], s["mz"]] for s in samples], axis=0)
@@ -63,26 +60,20 @@ def run_imu_fusion():
             # Préparation des données
             acc = np.array([m["ax"], m["ay"], m["az"]])
             # On retire le biais du gyro
-            gyr = np.array([m["gx"], m["gy"], m["gz"]]) - gyro_bias
+            gyr = np.array([m["gx"], m["gy"], m["gz"]])
             mag = np.array([m["mx"], m["my"], m["mz"]])
 
             # --- MISE À JOUR FOURATI ---
             # L'algorithme update prend q_prec, gyr, acc, mag et dt
             q = fourati.update(q, gyr, acc, mag, dt=dt)
 
-            # Conversion en Euler pour le monitoring
-            yaw, pitch, roll = quaternion_to_euler(q)
-
             # Affichage console pour débug
-            sys.stderr.write(f"\rFourati -> R:{np.rad2deg(roll):.1f}° P:{np.rad2deg(pitch):.1f}° Y:{np.rad2deg(yaw):.1f}°")
+            sys.stderr.write(f"\rFourati -> q0={q[0]}",f"q1={q[1]}",f"q2={q[2]}",f"q3={q[3]}")
             sys.stderr.flush()
 
             # Envoi JSON vers le serveur Web
             print(json.dumps({
                 "qx": float(q[1]), "qy": float(q[2]), "qz": float(q[3]), "qw": float(q[0]),
-                "roll": float(np.rad2deg(roll)),
-                "pitch": float(np.rad2deg(pitch)),
-                "yaw": float(np.rad2deg(yaw))
             }), flush=True)
 
     finally:
