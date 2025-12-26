@@ -70,9 +70,9 @@ def run_imu_fusion():
     print(f"✓ Orientation initiale calculée: {q0}", file=sys.stderr)
 
     # Bruits 
-    sigma_g = 0.01
+    sigma_g = 0.05
     sigma_a = 0.2
-    sigma_m = 5.0
+    sigma_m = 0.5
 
     # Référence du champ magnétique en NED
     I = np.deg2rad(MAG_INCLINATION)
@@ -124,7 +124,12 @@ def run_imu_fusion():
 
             q = ekf.update(q, gyr, acc, mag, dt=dt)
             
-            roll, pitch, yaw = quaternion_to_euler_direct(q)
+            yaw,pitch, roll, = quaternion_to_euler_direct(q)
+
+            sys.stderr.write(
+                f"\rEst: R:{np.rad2deg(roll):7.2f}° | P:{np.rad2deg(pitch):7.2f}° | Y:{np.rad2deg(yaw):7.2f}° | dt:{dt*1000:5.1f}ms"
+            )
+            sys.stderr.flush()
 
             print(json.dumps({
                 "qx": float(q[1]), # x
