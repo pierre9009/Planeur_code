@@ -51,7 +51,7 @@ def run_imu_fusion():
         imu.close()
         return
 
-    acc0 = -np.mean([[s["ax"], s["ay"], s["az"]] for s in samples], axis=0)
+    acc0 = np.mean([[s["ax"], s["ay"], s["az"]] for s in samples], axis=0)
     mag0 = np.mean([[s["mx"], s["my"], s["mz"]] for s in samples], axis=0)
 
     print(f"\nInitialisation:", file=sys.stderr)
@@ -118,7 +118,7 @@ def run_imu_fusion():
             if dt <= 0.0:
                 dt = 0.01
 
-            acc = -np.array([m["ax"], m["ay"], m["az"]], dtype=float)
+            acc = np.array([m["ax"], m["ay"], m["az"]], dtype=float)
             gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)
             mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
 
