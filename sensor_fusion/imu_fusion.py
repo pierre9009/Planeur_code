@@ -70,8 +70,8 @@ def run_imu_fusion():
     print(f"✓ Orientation initiale calculée: {q0}", file=sys.stderr)
 
     # Bruits 
-    sigma_g = 0.05
-    sigma_a = 0.2
+    sigma_g = 0.1
+    sigma_a = 0.1
     sigma_m = 0.5
 
     # Référence du champ magnétique en NED
