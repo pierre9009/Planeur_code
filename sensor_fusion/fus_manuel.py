@@ -68,7 +68,7 @@ def run_imu_fusion():
             q = fourati.update(q, gyr, acc, mag, dt=dt)
 
             # Affichage console pour débug
-            sys.stderr.write(f"\rFourati -> q0={q[0]}",f"q1={q[1]}",f"q2={q[2]}",f"q3={q[3]}")
+            sys.stderr.write(f"\rFourati -> q0={q[0]}, q1={q[1]}, q2={q[2]}, q3={q[3]}")
             sys.stderr.flush()
 
             # Envoi JSON vers le serveur Web
