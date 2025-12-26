@@ -52,7 +52,9 @@ def run_imu_fusion():
         return
 
     acc0 = np.mean([[s["ax"], s["ay"], s["az"]] for s in samples], axis=0)
+    acc0 = acc0/np.linalg.norm(acc0)
     mag0 = np.mean([[s["mx"], s["my"], s["mz"]] for s in samples], axis=0)
+    mag0 = mag0/np.linalg.norm(mag0)
 
     print(f"\nInitialisation:", file=sys.stderr)
     print(f"  ACC: [{acc0[0]:.3f}, {acc0[1]:.3f}, {acc0[2]:.3f}] m/s²", file=sys.stderr)
@@ -119,8 +121,11 @@ def run_imu_fusion():
                 dt = 0.01
 
             acc = np.array([m["ax"], m["ay"], m["az"]], dtype=float)
+            acc = acc/np.linalg.norm(acc)
             gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)
+            gyr = gyr/np.linalg.norm(gyr)
             mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
+            mag = mag/np.linalg.norm(mag)
 
             q = ekf.update(q, gyr, acc, mag, dt=dt)
             
