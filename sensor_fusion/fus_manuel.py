@@ -48,6 +48,7 @@ def run_imu_fusion():
             # ENVOI COMPLET : Fusion + RAW
             print(json.dumps({
                 "qw": float(q[0]), "qx": float(q[1]), "qy": float(q[2]), "qz": float(q[3]),
+                "roll": float(0.0), "pitch": float(0.0), "yaw": float(0.0),
                 "ax": m["ax"], "ay": m["ay"], "az": m["az"],
                 "gx": m["gx"], "gy": m["gy"], "gz": m["gz"],
                 "mx": m["mx"], "my": m["my"], "mz": m["mz"],
