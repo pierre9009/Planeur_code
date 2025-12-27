@@ -6,7 +6,7 @@ from imu_api import ImuSoftUart
 
 from ahrs.filters import EKF
 
-from ahrs.common.orientation import am2q
+from ahrs.common.orientation import acc2q
 
 
 def run_imu_fusion():
@@ -17,15 +17,12 @@ def run_imu_fusion():
 
     acc0 = np.array([m["ax"], m["ay"], m["az"]], dtype=float)  # m/s^2
     mag0 = np.array([m["mx"], m["my"], m["mz"]], dtype=float)  # uT
-    print(acc0.shape)
-    print(mag0.shape)
-    print(np.zeros((3,1)).shape)
 
-    q0=am2q(acc0, mag0)
+    q0=acc2q(acc0)
     q0=q0.flatten()
 
     # Initialisation du filtre EKF
-    ekf = EKF(gyr=np.zeros((1,3)), acc=acc0.reshape((1,3)), mag=mag0.reshape((1,3)), frequency=100,q0=q0, magnetic_ref=60.0)
+    ekf = EKF(gyr=np.zeros((1,3)), acc=acc0.reshape((1,3)), frequency=100,q0=q0)
 
     last_time=None
 
@@ -41,9 +38,9 @@ def run_imu_fusion():
 
             acc = np.array([m["ax"], m["ay"], m["az"]], dtype=float)
             gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)
-            mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
+            #mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
 
-            q = ekf.update(q, acc, gyr, mag, dt)
+            q = ekf.update(q, acc, gyr, dt)
 
             # ENVOI COMPLET : Fusion + RAW
             print(json.dumps({
