@@ -7,7 +7,6 @@ from fourati import AttitudeEstimator
 
 
 #
-
 def run_imu_fusion():
     imu = ImuSoftUart(rx_gpio=24, baudrate=57600)
     imu.open()
@@ -91,3 +90,7 @@ def run_imu_fusion():
         print("\nArrêt demandé", file=sys.stderr)
     finally:
         imu.close()
+
+
+if __name__ == "__main__":
+    run_imu_fusion()
