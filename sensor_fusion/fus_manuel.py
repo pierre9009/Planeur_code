@@ -17,7 +17,8 @@ def run_imu_fusion():
 
     acc0 = np.array([m["ax"], m["ay"], m["az"]], dtype=float)  # m/s^2
     mag0 = np.array([m["mx"], m["my"], m["mz"]], dtype=float)  # uT
-
+    print(acc0.shape)
+    print(mag0.shape)
 
     # Initialisation du filtre EKF
     ekf = EKF(gyr=np.zeros((3,1)), acc=acc0.reshape((3,1)), mag=mag0.reshape((3,1)), frequency =100, magnetic_ref=60.0)
