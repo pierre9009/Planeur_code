@@ -44,14 +44,10 @@ def run_imu_fusion():
             mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
 
             q = ekf.update(q, acc, gyr, mag, dt)
-            
-            # Conversion en Euler pour le dashboard (en degrés)
-            euler = np.rad2deg(quaternion_to_euler(q))
 
             # ENVOI COMPLET : Fusion + RAW
             print(json.dumps({
                 "qw": float(q[0]), "qx": float(q[1]), "qy": float(q[2]), "qz": float(q[3]),
-                "roll": float(euler[0]), "pitch": float(euler[1]), "yaw": float(euler[2]),
                 "ax": m["ax"], "ay": m["ay"], "az": m["az"],
                 "gx": m["gx"], "gy": m["gy"], "gz": m["gz"],
                 "mx": m["mx"], "my": m["my"], "mz": m["mz"],
