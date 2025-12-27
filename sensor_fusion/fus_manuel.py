@@ -6,7 +6,7 @@ from imu_api import ImuSoftUart
 
 from ahrs.filters import EKF
 
-from ahrs.common.orientation import acc2q
+from ahrs.common.orientation import am2q
 
 
 def run_imu_fusion():
@@ -21,10 +21,14 @@ def run_imu_fusion():
     print(mag0.shape)
     print(np.zeros((3,1)).shape)
 
+    q0=am2q(acc0, mag0)
+
     # Initialisation du filtre EKF
-    ekf = EKF(gyr=np.zeros((1,3)), acc=acc0.reshape((1,3)), mag=mag0.reshape((1,3)), frequency=100, magnetic_ref=60.0)
+    ekf = EKF(gyr=np.zeros((1,3)), acc=acc0.reshape((1,3)), mag=mag0.reshape((1,3)), frequency=100,q0=q0, magnetic_ref=60.0)
 
     last_time=None
+
+    q=q0
     try:
         while True:
             m = imu.read_measurement(timeout_s=1.0)
@@ -49,7 +53,7 @@ def run_imu_fusion():
 
             # Mise à jour EKF
 
-            q= ekf.update(acc, gyr, mag, dt)
+            q= ekf.update(q, acc, gyr, mag, dt)
             
 
             # Debug console
