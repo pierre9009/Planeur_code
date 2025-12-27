@@ -54,7 +54,7 @@ def run_imu_fusion():
             mag = np.array([m["mx"], m["my"], m["mz"]]) # uT
 
             # Mise à jour en ligne
-            q = estimator.update(gyr, acc, mag, dt)
+            q, b = estimator.update(gyr, acc, mag, dt)
 
             # Affichage console pour débug
             sys.stderr.write(f"\rFourati -> qw={q[0,0]:.4f}, qx={q[1,0]:.4f}, qy={q[2,0]:.4f}, qz={q[3,0]:.4f}")
