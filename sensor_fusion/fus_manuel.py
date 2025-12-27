@@ -28,7 +28,7 @@ def run_imu_fusion():
     estimator.q = estimator._ilsa(acc_mean, mag_mean, num_iter=20)
     print("✓ Quaternion initialisé:", estimator.q.T)
     
-    last_seq = 0
+    last_time = None
     print("✓ Filtre Fourati démarré.", file=sys.stderr)
 
     try:
