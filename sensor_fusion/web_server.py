@@ -64,6 +64,9 @@ def imu_reader_thread():
 @app.route('/')
 def index():
     return render_template('index.html')
+@app.route('/raw')
+def raw_data():
+    return render_template('raw.html')
 
 
 @socketio.on('connect')

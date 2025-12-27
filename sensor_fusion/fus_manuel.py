@@ -22,6 +22,7 @@ def run_imu_fusion():
     print(np.zeros((3,1)).shape)
 
     q0=am2q(acc0, mag0)
+    q0=q0.flatten()
 
     # Initialisation du filtre EKF
     ekf = EKF(gyr=np.zeros((1,3)), acc=acc0.reshape((1,3)), mag=mag0.reshape((1,3)), frequency=100,q0=q0, magnetic_ref=60.0)
@@ -32,40 +33,29 @@ def run_imu_fusion():
     try:
         while True:
             m = imu.read_measurement(timeout_s=1.0)
-            if m is None:
-                continue
+            if m is None: continue
 
-            # Calcul du dt avec timestamp réel
             current_time = time.time()
-            if last_time is not None:
-                dt = current_time - last_time
-                # garde-fou si jitter/timeouts
-                if dt <= 0.0 or dt > 0.2:
-                    dt = 0.01
-            else:
-                dt = 0.01
+            dt = current_time - last_time if last_time else 0.01
             last_time = current_time
 
-            # Données capteurs
-            acc = np.array([m["ax"], m["ay"], m["az"]], dtype=float)  # m/s^2
-            gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)  # rad/s
-            mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)  # uT
+            acc = np.array([m["ax"], m["ay"], m["az"]], dtype=float)
+            gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)
+            mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
 
-            # Mise à jour EKF
-
-            q= ekf.update(q, acc, gyr, mag, dt)
+            q = ekf.update(q, acc, gyr, mag, dt)
             
+            # Conversion en Euler pour le dashboard (en degrés)
+            euler = np.rad2deg(quaternion_to_euler(q))
 
-            # Debug console
-            sys.stderr.write(
-                f"\rEKF -> qw={q[0]:.4f}, qx={q[1]:.4f}, qy={q[2]:.4f}, qz={q[3]:.4f}   dt={dt:.4f}   "
-            )
-            sys.stderr.flush()
-
-            # Envoi JSON vers le serveur Web
+            # ENVOI COMPLET : Fusion + RAW
             print(json.dumps({
-                "qw": float(q[0]), "qx": float(q[1]),
-                "qy": float(q[2]), "qz": float(q[3]),
+                "qw": float(q[0]), "qx": float(q[1]), "qy": float(q[2]), "qz": float(q[3]),
+                "roll": float(euler[0]), "pitch": float(euler[1]), "yaw": float(euler[2]),
+                "ax": m["ax"], "ay": m["ay"], "az": m["az"],
+                "gx": m["gx"], "gy": m["gy"], "gz": m["gz"],
+                "mx": m["mx"], "my": m["my"], "mz": m["mz"],
+                "dt": dt * 1000 # en ms pour l'affichage
             }), flush=True)
 
     finally:
