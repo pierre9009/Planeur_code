@@ -21,8 +21,8 @@ def run_imu_fusion():
         m = imu.read_measurement(timeout_s=0.5)
         if m: samples.append(m)
 
-    acc_mean = np.mean([m["ax"], m["ay"], m["az"]], axis=1)
-    mag_mean = np.mean([m["mx"], m["my"], m["mz"]], axis=1)
+    acc_mean = np.mean([[s["ax"], s["ay"], s["az"]] for s in samples], axis=0)
+    mag_mean = np.mean([[s["mx"], s["my"], s["mz"]] for s in samples], axis=0)
 
     # Initialiser le quaternion avec ILSA
     estimator.q = estimator._ilsa(acc_mean, mag_mean, num_iter=20)
