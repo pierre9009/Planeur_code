@@ -22,7 +22,7 @@ def run_imu_fusion():
     q0=q0.flatten()
 
     # Initialisation du filtre EKF
-    ekf = EKF(gyr=np.zeros((1,3)), acc=acc0.reshape((1,3)), frequency=100,q0=q0)
+    ekf = EKF(gyr=np.zeros((1,3)), acc=acc0.reshape((1,3)), mag=mag0.reshape((1,3)) frequency=100,q0=q0)
 
     last_time=None
 
@@ -38,9 +38,9 @@ def run_imu_fusion():
 
             acc = np.array([m["ax"], m["ay"], m["az"]], dtype=float)
             gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)
-            #mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
+            mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
 
-            q = ekf.update(q=q, gyr = gyr, acc = acc, dt = dt)
+            q = ekf.update(q=q, gyr = gyr, acc = acc, mag = mag, dt = dt)
 
             # ENVOI COMPLET : Fusion + RAW
             print(json.dumps({
