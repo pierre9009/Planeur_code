@@ -128,5 +128,5 @@ class AttitudeEstimator:
 
         self.bias = dbias * dt + self.bias
 
-        return self.q, self.bias
+        return self.q
     
