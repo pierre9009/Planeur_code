@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 class AttitudeEstimator:
@@ -16,8 +17,8 @@ class AttitudeEstimator:
         self.tau = 80 # seconde
         
         # Vecteurs de référence (Navigation frame F_I) [cite: 121, 160]
-        self.g_ref = np.array([0.0, 0.0, 1.0])  # Gravité normalisée en quaternion
-        self.m_ref = np.array([0.5, 0.0, np.sqrt(3)/2])  # Champ magnétique normalisé (dip angle 60°) en quaternion
+        self.g_ref = np.array([0.0, 0.0, 1.0])  # Gravité normalisée
+        self.m_ref = np.array([0.5, 0.0, np.sqrt(3)/2])  # Champ magnétique normalisé (dip angle 60°)
 
     def _skew(self, v):
         return np.array([
@@ -41,7 +42,7 @@ class AttitudeEstimator:
         return product_result
     
 
-    def _ilsa(self, acc, mag, num_iter=8):
+    def _ilsa(self, acc, mag, num_iter=5):
         """Iterated Least Squares Algorithm pour obtenir q_m [cite: 215-227]."""
         q_est = self.q.copy()
         # Normalisation des mesures
@@ -128,5 +129,96 @@ class AttitudeEstimator:
 
         self.bias = dbias * dt + self.bias
 
-        return self.q
+        return self.q, self.bias
+    
+def simulate_and_plot():
+    dt = 0.01
+    T = 50.0
+    steps = int(T/dt)
+    time = np.linspace(0, T, steps)
+
+    # 1. Génération de la Vérité Terrain (Ground Truth)
+    q_true = np.zeros((4, steps))
+    q_true[:, 0] = [1.0, 0.0, 0.0, 0.0] # Init théorique 
+    
+    # Biais réel du gyroscope (simulé comme un processus de Gauss-Markov)
+    bias_true = np.zeros((3, steps))
+    bias_true[:, 0] = [-2.0, 1.0, 0.5] # Biais initaux 
+
+    # Profil de vitesse angulaire du papier (Eq. 14) [cite: 327, 329]
+    def get_omega(t):
+        if t <= 25:
+            return np.array([-0.8*np.sin(1.2*t), 1.1*np.cos(0.5*t), 0.4*np.sin(0.3*t)])
+        else:
+            return np.array([1.3*np.sin(1.4*t), -0.6*np.cos(-0.3*t), 0.3*np.sin(0.5*t)])
+
+    # Intégration de la trajectoire réelle
+    for i in range(1, steps):
+        t = time[i-1]
+        w = get_omega(t)
+        q = q_true[:, i-1]
+        mat = 0.5 * np.array([[-q[1], -q[2], -q[3]],
+                              [q[0], -q[3], q[2]],
+                              [q[3], q[0], -q[1]],
+                              [-q[2], q[1], q[0]]])
+        q_true[:, i] = q + (mat @ w) * dt
+        q_true[:, i] /= np.linalg.norm(q_true[:, i])
+        # Évolution lente du biais
+        bias_true[:, i] = bias_true[:, i-1] * (1 - dt/80.0)
+
+    # 2. Simulation des Capteurs (avec bruit) 
+    gyro_meas = np.zeros((3, steps))
+    acc_meas = np.zeros((3, steps))
+    mag_meas = np.zeros((3, steps))
+    
+    g_nav = np.array([0, 0, 1])
+    m_nav = np.array([0.5, 0, np.sqrt(3)/2])
+
+    for i in range(steps):
+        q = q_true[:, i]
+        # Matrice de rotation (Navigation vers Corps)
+        q0, q1, q2, q3 = q
+        R = np.array([
+            [2*(q0**2+q1**2)-1, 2*(q1*q2+q0*q3), 2*(q1*q3-q0*q2)],
+            [2*(q1*q2-q0*q3), 2*(q0**2+q2**2)-1, 2*(q0*q1+q2*q3)],
+            [2*(q1*q3+q0*q2), 2*(q2*q3-q0*q1), 2*(q0**2+q3**2)-1]
+        ])
+
+        gyro_meas[:, i] = get_omega(time[i]) + bias_true[:, i] + np.random.normal(0, 0.01, 3)
+        acc_meas[:, i] = R @ g_nav + np.random.normal(0, 0.002, 3)
+        mag_meas[:, i] = R @ m_nav + np.random.normal(0, 0.007, 3)
+        print(f"\rFourati -> gyro={gyro_meas[:, i]}, acc={acc_meas[:, i]}, mag={mag_meas[:, i]}")
+
+    # 3. Exécution de l'Estimateur
+    # Initialisation de l'observateur avec erreur (Table 1) 
+    estimator = AttitudeEstimator(k_q=100, k_b=200)
+    q_est_hist = np.zeros((4, steps))
+    bias_est_hist = np.zeros((3, steps))
+
+    for i in range(steps):
+        qe, be = estimator.update(gyro_meas[:, i], acc_meas[:, i], mag_meas[:, i], dt)
+        q_est_hist[:, i] = qe.flatten()
+        bias_est_hist[:, i] = be.flatten()
+
+    # 4. Affichage des Résultats
+    fig, axes = plt.subplots(4, 1, figsize=(10, 10), sharex=True)
+    for i in range(4):
+        axes[i].plot(time, q_true[i, :], 'k--', label='Théorique' if i==0 else "")
+        axes[i].plot(time, q_est_hist[i, :], 'r', label='Estimé' if i==0 else "")
+        axes[i].set_ylabel(f'q{i}')
+    axes[0].set_title('Suivi des Quaternions (Convergence de l\'observateur)')
+    axes[0].legend()
+
+    plt.figure(figsize=(10, 6))
+    for i in range(3):
+        plt.subplot(3, 1, i+1)
+        plt.plot(time, bias_true[i, :], 'k--', label='Vrai Biais')
+        plt.plot(time, bias_est_hist[i, :], 'b', label='Biais Estimé')
+        plt.ylabel(f'Bias {["x","y","z"][i]} (rad/s)')
+    plt.suptitle('Estimation du Biais du Gyroscope')
+    plt.tight_layout()
+    plt.show()
+
+if __name__ == "__main__":
+    simulate_and_plot()
     
