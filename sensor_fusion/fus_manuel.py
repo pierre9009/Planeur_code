@@ -24,7 +24,7 @@ def run_imu_fusion():
     # Initialisation du filtre EKF
     ekf = EKF(gyr=np.zeros((1,3)), acc=acc0.reshape((1,3)), mag=mag0.reshape((1,3)), frequency=100, magnetic_ref=60.0)
 
-
+    last_time=None
     try:
         while True:
             m = imu.read_measurement(timeout_s=1.0)
