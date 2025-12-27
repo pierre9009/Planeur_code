@@ -40,7 +40,7 @@ def run_imu_fusion():
             gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)
             #mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)
 
-            q = ekf.update(q, acc, gyr, dt)
+            q = ekf.update(q=q, gyr = gyr, acc = acc, dt = dt)
 
             # ENVOI COMPLET : Fusion + RAW
             print(json.dumps({
