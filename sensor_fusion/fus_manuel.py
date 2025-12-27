@@ -3,63 +3,73 @@ import json
 import sys
 import numpy as np
 from imu_api import ImuSoftUart
-from fourati import AttitudeEstimator
+from ekf_attitude import AttitudeEKF
 
 
 def run_imu_fusion():
     imu = ImuSoftUart(rx_gpio=24, baudrate=57600)
     imu.open()
-    
-    # Initialisation du filtre
-    estimator = AttitudeEstimator(k_q=5, k_b=10) 
 
+    # Initialisation du filtre EKF
+    ekf = AttitudeEKF()
+
+    # Petite phase de "warmup" immobile (stabilise un peu l'EKF au démarrage)
     samples = []
     print("Initialisation (NE PAS BOUGER)...", file=sys.stderr)
     while len(samples) < 50:
         m = imu.read_measurement(timeout_s=0.5)
-        if m: samples.append(m)
+        if m:
+            samples.append(m)
 
     acc_mean = np.mean([[s["ax"], s["ay"], s["az"]] for s in samples], axis=0)
     mag_mean = np.mean([[s["mx"], s["my"], s["mz"]] for s in samples], axis=0)
 
-    # Initialiser le quaternion avec ILSA
-    estimator.q = estimator._ilsa(acc_mean, mag_mean, num_iter=20)
-    print("✓ Quaternion initialisé:", estimator.q.T)
-    
+    # On "prime" l'EKF quelques itérations avec gyro=0 pour converger accel+mag
+    # (pas aussi propre qu'un solveur ILSA, mais ça marche bien si tu es immobile)
+    dt0 = 0.01
+    for _ in range(200):
+        q, b = ekf.update(np.zeros(3), acc_mean, mag_mean, dt0)
+
+    print(f"✓ Quaternion initialisé: qw={q[0]:.4f}, qx={q[1]:.4f}, qy={q[2]:.4f}, qz={q[3]:.4f}", file=sys.stderr)
+
     last_time = None
-    print("✓ Filtre Fourati démarré.", file=sys.stderr)
+    print("✓ Filtre EKF démarré.", file=sys.stderr)
 
     try:
         while True:
             m = imu.read_measurement(timeout_s=1.0)
-            if m is None: continue
+            if m is None:
+                continue
 
             # Calcul du dt avec timestamp réel
             current_time = time.time()
             if last_time is not None:
                 dt = current_time - last_time
+                # garde-fou si jitter/timeouts
+                if dt <= 0.0 or dt > 0.2:
+                    dt = 0.01
             else:
                 dt = 0.01
             last_time = current_time
 
-            # Données capteurs 
-            acc = np.array([m["ax"], m["ay"], m["az"]]) # m/s^2
-            gyr = np.array([m["gx"], m["gy"], m["gz"]]) # rad/s
-            mag = np.array([m["mx"], m["my"], m["mz"]]) # uT
+            # Données capteurs
+            acc = np.array([m["ax"], m["ay"], m["az"]], dtype=float)  # m/s^2
+            gyr = np.array([m["gx"], m["gy"], m["gz"]], dtype=float)  # rad/s
+            mag = np.array([m["mx"], m["my"], m["mz"]], dtype=float)  # uT
 
-            # Mise à jour en ligne
-            q, b = estimator.update(gyr, acc, mag, dt)
+            # Mise à jour EKF
+            q, b = ekf.update(gyr, acc, mag, dt)
 
-            # Affichage console pour débug
-            sys.stderr.write(f"\rFourati -> qw={q[0,0]:.4f}, qx={q[1,0]:.4f}, qy={q[2,0]:.4f}, qz={q[3,0]:.4f}")
-            sys.stderr.flush()
-            sys.stderr.write(f"\rdt = {dt}")
+            # Debug console
+            sys.stderr.write(
+                f"\rEKF -> qw={q[0]:.4f}, qx={q[1]:.4f}, qy={q[2]:.4f}, qz={q[3]:.4f}   dt={dt:.4f}   "
+            )
             sys.stderr.flush()
 
             # Envoi JSON vers le serveur Web
             print(json.dumps({
-                "qw": float(q[0,0]), "qx": float(q[1,0]), 
-                "qy": float(q[2,0]), "qz": float(q[3,0]),
+                "qw": float(q[0]), "qx": float(q[1]),
+                "qy": float(q[2]), "qz": float(q[3]),
             }), flush=True)
 
     finally:

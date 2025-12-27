@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import math
 
 
 class AttitudeEstimator:
@@ -8,23 +9,22 @@ class AttitudeEstimator:
 
         self.k_q = k_q  # Gain pour le quaternion
         self.k_b = k_b  # Gain pour le biais du gyroscope
-        self.alpha = alpha  # Vitesse de convergence ILSA [cite: 225]
+        self.alpha = alpha  # Vitesse de convergence ILSA
         
-        # États initialisés [cite: 351]
+        # États initialisés
         self.q = np.array([[1.0], [0.0], [0.0], [0.0]])  # Quaternion estimé (w, x, y, z)
         self.bias = np.zeros((3,1))  # Biais du gyroscope estimé
 
         self.tau = 10 # seconde
         
-        # Vecteurs de référence (Navigation frame F_I) [cite: 121, 160]
-        self.g_ref = np.array([0.0, 0.0, 1.0])  # Gravité normalisée
+        # Vecteurs de référence (Navigation frame NED)
+        self.g_ref = np.array([0.0, 0.0, 1.0])
 
-        dip_angle_rad = np.radians(63.0)
         self.m_ref = np.array([
-            np.cos(dip_angle_rad),   # Composante Nord
-            0.0,                      # Composante Est
-            -np.sin(dip_angle_rad)    # Composante Up (négatif)
-        ])  # Champ magnétique normalisé (dip angle 60°)
+            0.5,
+            0.0,
+            math.sqrt(3)/2
+        ])
 
     def _skew(self, v):
         return np.array([
@@ -117,6 +117,7 @@ class AttitudeEstimator:
         q1 = self.q[1,0]
         q2 = self.q[2,0]
         q3 = self.q[3,0]
+        
         quater_tempo = (0.5)*np.array([[-q1, -q2, -q3],
                                        [q0, -q3, q2],
                                        [q3, q0 , -q1],
