@@ -17,8 +17,14 @@ class AttitudeEstimator:
         self.tau = 10 # seconde
         
         # Vecteurs de référence (Navigation frame F_I) [cite: 121, 160]
-        self.g_ref = np.array([0.0, 0.0, 1.0])  # Gravité normalisée
-        self.m_ref = np.array([0.5, 0.0, np.sqrt(3)/2])  # Champ magnétique normalisé (dip angle 60°)
+        self.g_ref = np.array([0.0, 0.0, -1.0])  # Gravité normalisée
+
+        dip_angle_rad = np.radians(63.0)
+        self.m_ref = np.array([
+            np.cos(dip_angle_rad),   # Composante Nord
+            0.0,                      # Composante Est
+            -np.sin(dip_angle_rad)    # Composante Up (négatif)
+        ])  # Champ magnétique normalisé (dip angle 60°)
 
     def _skew(self, v):
         return np.array([
