@@ -2,49 +2,24 @@ import time
 import json
 import sys
 import numpy as np
-from ahrs.filters import Fourati
-from ahrs.common.orientation import ecompass
 from imu_api import ImuSoftUart
-from scipy.spatial.transform import Rotation as R
+from fourati import AttitudeEstimator
 
-# ------------------------------------------------------------
-# Configuration Locale (Identique à tes paramètres)
-# ------------------------------------------------------------
-MAG_INCLINATION = 60.2  # DIP angle deg
-MAG_DECLINATION = 2.7   # Déclinaison deg
 
-def quaternion_to_euler(q):
-    """ Convention AHRS: [w, x, y, z] -> Scipy: [x, y, z, w] """
-    q_scipy = [q[1], q[2], q[3], q[0]]
-    r = R.from_quat(q_scipy)
-    return r.as_euler('zyx', degrees=False)
+#
 
 def run_imu_fusion():
     imu = ImuSoftUart(rx_gpio=24, baudrate=57600)
     imu.open()
+    
+    # Initialisation du filtre
+    estimator = AttitudeEstimator(k_q=100.0, k_b=200.0) 
 
-    # 1. Collecte d'initialisation pour le biais du Gyro
     samples = []
     print("Initialisation (NE PAS BOUGER)...", file=sys.stderr)
     while len(samples) < 50:
         m = imu.read_measurement(timeout_s=0.5)
         if m: samples.append(m)
-    
-    # Récupération des premières valeurs pour l'orientation initiale
-    acc0 = np.mean([[s["ax"], s["ay"], s["az"]] for s in samples], axis=0)
-    mag0 = np.mean([[s["mx"], s["my"], s["mz"]] for s in samples], axis=0)
-    mag0 = mag0/1000
-
-    # 2. Initialisation du filtre de Fourati
-    # On passe l'inclinaison magnétique (magnetic_dip)
-    fourati = Fourati(
-        frequency=100.0, 
-        gain=0.2, 
-        magnetic_dip=MAG_INCLINATION
-    )
-
-    # Calcul du quaternion initial (Convention NED pour Fourati)
-    q = ecompass(acc0, mag0, frame='NED', representation='quaternion')
     
     last_seq = 0
     print("✓ Filtre Fourati démarré.", file=sys.stderr)
@@ -54,28 +29,26 @@ def run_imu_fusion():
             m = imu.read_measurement(timeout_s=1.0)
             if m is None: continue
 
-            # Gestion du temps (dt)
+            # Gestion du temps (dt) [cite: 317]
             dt = (m["seq"] - last_seq) * 0.010 if last_seq > 0 else 0.010
             last_seq = m["seq"]
 
-            # Préparation des données
-            acc = np.array([m["ax"], m["ay"], m["az"]])
+            # Données capteurs 
+            acc = np.array([m["ax"], m["ay"], m["az"]]) # m/s^2
+            gyr = np.array([m["gx"], m["gy"], m["gz"]]) # rad/s
+            mag = np.array([m["mx"], m["my"], m["mz"]]) # uT
 
-            gyr = np.array([m["gx"], m["gy"], m["gz"]])
-            mag = np.array([m["mx"], m["my"], m["mz"]])
-            mag = mag/1000
-
-            # --- MISE À JOUR FOURATI ---
-            # L'algorithme update prend q_prec, gyr, acc, mag et dt
-            q = fourati.update(q, gyr, acc, mag, dt=dt)
+            # Mise à jour en ligne
+            q = estimator.update(gyr, acc, mag, dt)
 
             # Affichage console pour débug
-            sys.stderr.write(f"\rFourati -> q0={q[0]}, q1={q[1]}, q2={q[2]}, q3={q[3]}")
+            sys.stderr.write(f"\rFourati -> qw={q[0,0]:.4f}, qx={q[1,0]:.4f}, qy={q[2,0]:.4f}, qz={q[3,0]:.4f}")
             sys.stderr.flush()
 
             # Envoi JSON vers le serveur Web
             print(json.dumps({
-                "qx": float(q[1]), "qy": float(q[2]), "qz": float(q[3]), "qw": float(q[0]),
+                "qw": float(q[0,0]), "qx": float(q[1,0]), 
+                "qy": float(q[2,0]), "qz": float(q[3,0]),
             }), flush=True)
 
     finally:
