@@ -21,7 +21,7 @@ def run_imu_fusion():
     print(mag0.shape)
 
     # Initialisation du filtre EKF
-    ekf = EKF(gyr=np.zeros((3,1)), acc=acc0.reshape((3,1)), mag=mag0.reshape((3,1)), frequency =100, magnetic_ref=60.0)
+    ekf = EKF(gyr=np.zeros((3,1)).reshape((3,1)), acc=acc0.reshape((3,1)), mag=mag0.reshape((3,1)), frequency =100, magnetic_ref=60.0)
 
 
     try:
