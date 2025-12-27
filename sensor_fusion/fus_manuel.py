@@ -11,13 +11,10 @@ def run_imu_fusion():
     imu = ImuSoftUart(rx_gpio=24, baudrate=57600)
     imu.open()
     
-    # GAINS RÉDUITS
-    estimator = AttitudeEstimator(k_q=5.0, k_b=10.0)
-    
     # Phase d'initialisation
     print("Initialisation (NE PAS BOUGER)...", file=sys.stderr)
     samples = []
-    while len(samples) < 100:  # ← Plus d'échantillons (100 au lieu de 50)
+    while len(samples) < 100:
         m = imu.read_measurement(timeout_s=0.5)
         if m: 
             samples.append(m)
@@ -26,7 +23,6 @@ def run_imu_fusion():
     
     print("\n\n=== STATISTIQUES INITIALISATION ===", file=sys.stderr)
     
-    # Calcul des moyennes ET écarts-types
     acc_samples = np.array([[s["ax"], s["ay"], s["az"]] for s in samples])
     mag_samples = np.array([[s["mx"], s["my"], s["mz"]] for s in samples])
     gyr_samples = np.array([[s["gx"], s["gy"], s["gz"]] for s in samples])
@@ -41,17 +37,35 @@ def run_imu_fusion():
     print(f"Acc  : {acc_mean} ± {acc_std}", file=sys.stderr)
     print(f"Mag  : {mag_mean} ± {mag_std}", file=sys.stderr)
     print(f"Gyro : {gyr_mean} ± {gyr_std}", file=sys.stderr)
-    print(f"Norm(acc): {np.linalg.norm(acc_mean):.3f} m/s² (attendu: ~9.81)", file=sys.stderr)
+    print(f"Norm(acc): {np.linalg.norm(acc_mean):.3f} m/s²", file=sys.stderr)
     print(f"Norm(mag): {np.linalg.norm(mag_mean):.3f} µT", file=sys.stderr)
     
-    # IMPORTANT : Initialiser le biais du gyroscope avec la moyenne !
-    estimator.bias = gyr_mean.reshape((3,1))
-    print(f"Biais gyro initial: {estimator.bias.T}", file=sys.stderr)
+    # ✅ CALCULER g_ref et m_ref depuis les mesures initiales (capteur immobile)
+    g_ref_measured = -acc_mean / np.linalg.norm(acc_mean)  # Gravité normalisée (inverse de l'accéléromètre)
+    m_ref_measured = mag_mean / np.linalg.norm(mag_mean)   # Magnétomètre normalisé
     
-    # Initialisation du quaternion avec ILSA
+    print(f"\n✅ Vecteurs de référence calculés :", file=sys.stderr)
+    print(f"   g_ref = {g_ref_measured}", file=sys.stderr)
+    print(f"   m_ref = {m_ref_measured}", file=sys.stderr)
+    
+    # ✅ Initialiser l'estimateur avec ces vecteurs
+    estimator = AttitudeEstimator(k_q=5.0, k_b=10.0)
+    estimator.g_ref = g_ref_measured  # ← Remplacer le vecteur par défaut
+    estimator.m_ref = m_ref_measured  # ← Remplacer le vecteur par défaut
+    
+    # Initialiser le biais gyro
+    estimator.bias = gyr_mean.reshape((3,1))
+    print(f"   Biais gyro initial: {estimator.bias.T}", file=sys.stderr)
+    
+    # Initialiser le quaternion avec ILSA
     estimator.q = estimator._ilsa(acc_mean, mag_mean, num_iter=20)
-    print(f"Quaternion initial: {estimator.q.T}", file=sys.stderr)
+    print(f"   Quaternion initial: {estimator.q.T}", file=sys.stderr)
     print("="*40 + "\n", file=sys.stderr)
+    
+    # ⚠️ VÉRIFICATION CRITIQUE : Le quaternion initial doit être proche de [1, 0, 0, 0]
+    if abs(estimator.q[0,0]) < 0.9:
+        print("⚠️  ATTENTION : Quaternion initial anormal !", file=sys.stderr)
+        print("   Le capteur est peut-être mal orienté ou le magnétomètre est perturbé.", file=sys.stderr)
     
     last_time = None
     iteration = 0
@@ -74,11 +88,10 @@ def run_imu_fusion():
             
             q, bias = estimator.update(gyr, acc, mag, dt)
             
-            # Affichage tous les 10 échantillons
             iteration += 1
             if iteration % 10 == 0:
                 norm_q = np.linalg.norm(q)
-                sys.stderr.write(f"\rq=[{q[0,0]:+.3f}, {q[1,0]:+.3f}, {q[2,0]:+.3f}, {q[3,0]:+.3f}] |q|={norm_q:.4f} bias={bias.T}")
+                sys.stderr.write(f"\rq=[{q[0,0]:+.3f}, {q[1,0]:+.3f}, {q[2,0]:+.3f}, {q[3,0]:+.3f}] |q|={norm_q:.4f}")
                 sys.stderr.flush()
             
             print(json.dumps({
