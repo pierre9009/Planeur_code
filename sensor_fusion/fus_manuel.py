@@ -6,7 +6,7 @@ from imu_api import ImuSoftUart
 
 from ahrs.filters import EKF
 
-from ahrs.common.orientation import acc2q
+from ahrs.common.orientation import am2q
 
 
 def run_imu_fusion():
@@ -18,7 +18,7 @@ def run_imu_fusion():
     acc0 = np.array([m["ax"], m["ay"], m["az"]], dtype=float)  # m/s^2
     mag0 = np.array([m["mx"], m["my"], m["mz"]], dtype=float)  # uT
 
-    q0=acc2q(acc0)
+    q0=am2q(acc0)
     q0=q0.flatten()
 
     # Initialisation du filtre EKF
