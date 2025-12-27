@@ -44,6 +44,8 @@ def run_imu_fusion():
             # Affichage console pour débug
             sys.stderr.write(f"\rFourati -> qw={q[0,0]:.4f}, qx={q[1,0]:.4f}, qy={q[2,0]:.4f}, qz={q[3,0]:.4f}")
             sys.stderr.flush()
+            sys.stderr.write(f"\rdt = {dt}")
+            sys.stderr.flush()
 
             # Envoi JSON vers le serveur Web
             print(json.dumps({
