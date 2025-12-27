@@ -18,7 +18,7 @@ def run_imu_fusion():
     acc0 = np.array([m["ax"], m["ay"], m["az"]], dtype=float)  # m/s^2
     mag0 = np.array([m["mx"], m["my"], m["mz"]], dtype=float)  # uT
 
-    q0=am2q(acc0)
+    q0=am2q(a=acc0,m=mag0,frame='NED')
     q0=q0.flatten()
 
     # Initialisation du filtre EKF
