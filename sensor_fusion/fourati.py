@@ -14,7 +14,7 @@ class AttitudeEstimator:
         self.q = np.array([[1.0], [0.0], [0.0], [0.0]])  # Quaternion estimé (w, x, y, z)
         self.bias = np.zeros((3,1))  # Biais du gyroscope estimé
 
-        self.tau = 80 # seconde
+        self.tau = 10 # seconde
         
         # Vecteurs de référence (Navigation frame F_I) [cite: 121, 160]
         self.g_ref = np.array([0.0, 0.0, 1.0])  # Gravité normalisée

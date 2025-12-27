@@ -13,7 +13,7 @@ def run_imu_fusion():
     imu.open()
     
     # Initialisation du filtre
-    estimator = AttitudeEstimator(k_q=100, k_b=200) 
+    estimator = AttitudeEstimator(k_q=10, k_b=20) 
 
     samples = []
     print("Initialisation (NE PAS BOUGER)...", file=sys.stderr)
