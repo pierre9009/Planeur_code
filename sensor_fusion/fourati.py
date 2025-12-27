@@ -2,9 +2,9 @@ import numpy as np
 
 
 class AttitudeEstimator:
-    def __init__(self, dt=0.01, k_q=100.0, k_b=200.0, alpha=0.33):
+    def __init__(self, k_q=100.0, k_b=200.0, alpha=0.33):
         # Paramètres de l'observateur [cite: 318, 319]
-        self.dt = dt
+
         self.k_q = k_q  # Gain pour le quaternion
         self.k_b = k_b  # Gain pour le biais du gyroscope
         self.alpha = alpha  # Vitesse de convergence ILSA [cite: 225]
@@ -92,7 +92,7 @@ class AttitudeEstimator:
             q_est = q_est/np.linalg.norm(q_est)
         return q_est 
 
-    def update(self, gyro, acc, mag):
+    def update(self, gyro, acc, mag, dt):
         """Mise à jour de l'estimation à chaque pas de temps (Online)."""
         gyro = gyro.reshape((3,1))
 
@@ -123,10 +123,10 @@ class AttitudeEstimator:
         dbias = -Ninv@self.bias - self.k_b * q_vect_er
 
         #euler approx
-        self.q = dq * self.dt + self.q
+        self.q = dq * dt + self.q
         self.q /= np.linalg.norm(self.q)
 
-        self.bias = dbias * self.dt + self.bias
+        self.bias = dbias * dt + self.bias
 
         return self.q, self.bias
     
