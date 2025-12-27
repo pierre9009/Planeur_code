@@ -17,7 +17,7 @@ class AttitudeEstimator:
         self.tau = 10 # seconde
         
         # Vecteurs de référence (Navigation frame F_I) [cite: 121, 160]
-        self.g_ref = np.array([0.0, 0.0, -1.0])  # Gravité normalisée
+        self.g_ref = np.array([0.0, 0.0, 1.0])  # Gravité normalisée
 
         dip_angle_rad = np.radians(63.0)
         self.m_ref = np.array([
