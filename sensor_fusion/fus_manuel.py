@@ -22,7 +22,7 @@ def run_imu_fusion():
     q0=q0.flatten()
 
     # Initialisation du filtre EKF
-    ekf = EKF(gyr=np.zeros((1,3)), acc=acc0.reshape((1,3)), mag=mag0.reshape((1,3)) frequency=100,q0=q0)
+    ekf = EKF(gyr=np.zeros((1,3)), acc=acc0.reshape((1,3)), mag=mag0.reshape((1,3)), frequency=100,q0=q0)
 
     last_time=None
 
