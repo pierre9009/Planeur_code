@@ -17,7 +17,7 @@ from core import Config, load_config
 from core.types import ImuReading
 from core.validation import SensorValidator
 from core.quaternion import QuaternionOps
-from communication.uart import MockImuUart
+from communication.uart import ImuHardwareUart as MockImuUart
 from fusion import EkfWrapper, FusionInitializer
 from monitoring import PerformanceMonitor
 
