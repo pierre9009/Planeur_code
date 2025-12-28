@@ -11,8 +11,8 @@ try:
 except ImportError:
     SERIAL_AVAILABLE = False
 
-from ..core.types import ImuReading, SensorStats
-from ..core.config import Config
+from core.types import ImuReading, SensorStats
+from core.config import Config
 
 logger = logging.getLogger(__name__)
 

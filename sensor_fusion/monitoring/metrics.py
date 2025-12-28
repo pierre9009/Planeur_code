@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import Optional, Deque
 import numpy as np
 
-from ..core.config import Config
-from ..core.types import SensorStats
+from core.config import Config
+from core.types import SensorStats
 
 logger = logging.getLogger(__name__)
 

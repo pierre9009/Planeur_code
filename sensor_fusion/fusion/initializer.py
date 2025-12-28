@@ -10,8 +10,8 @@ from typing import List, Tuple, Protocol
 import numpy as np
 from numpy.typing import NDArray
 
-from ..core.types import ImuReading
-from ..core.config import Config
+from core.types import ImuReading
+from core.config import Config
 
 logger = logging.getLogger(__name__)
 

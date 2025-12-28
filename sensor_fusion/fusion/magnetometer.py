@@ -11,7 +11,7 @@ from typing import Optional
 import numpy as np
 from numpy.typing import NDArray
 
-from ..core.config import Config
+from core.config import Config
 
 logger = logging.getLogger(__name__)
 

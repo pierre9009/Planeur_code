@@ -9,6 +9,6 @@ scipy
 pyyaml
 
 # Development/testing dependencies
-pytest
+pytest>=7.0
 pytest-cov
 mypy

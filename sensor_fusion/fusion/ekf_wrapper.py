@@ -14,11 +14,11 @@ from numpy.typing import NDArray
 from ahrs.filters import EKF
 from ahrs.common.orientation import q2euler
 
-from ..core.types import Quaternion, EulerAngles, FusionState, ImuReading
-from ..core.config import Config
-from ..core.quaternion import QuaternionOps
-from ..core.validation import QuaternionValidator
-from .magnetometer import MagnetometerProcessor
+from core.types import Quaternion, EulerAngles, FusionState, ImuReading
+from core.config import Config
+from core.quaternion import QuaternionOps
+from core.validation import QuaternionValidator
+from fusion.magnetometer import MagnetometerProcessor
 
 logger = logging.getLogger(__name__)
 
