@@ -42,6 +42,8 @@ def run_imu_fusion():
 
             q = ekf.update(q=q, gyr = gyr, acc = acc, mag = mag, dt = dt)
 
+            print(f"acc = {acc}, gyr={gyr}, mag = {mag}")
+
             # ENVOI COMPLET : Fusion + RAW
             print(json.dumps({
                 "qw": float(q[0]), "qx": float(q[1]), "qy": float(q[2]), "qz": float(q[3]),
