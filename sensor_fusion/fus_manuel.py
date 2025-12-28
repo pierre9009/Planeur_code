@@ -10,7 +10,7 @@ from ahrs.common.orientation import am2q
 
 
 def run_imu_fusion():
-    imu = ImuSoftUart(rx_gpio=24, baudrate=115200)
+    imu = ImuSoftUart(rx_gpio=24, baudrate=80000)
     imu.open()
 
     m = imu.read_measurement(timeout_s=1.0)

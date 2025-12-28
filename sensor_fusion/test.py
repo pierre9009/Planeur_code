@@ -352,7 +352,7 @@ def run_full_diagnostic():
     print("║" + " "*10 + "DIAGNOSTIC IMU - AXES vs CALIBRATION" + " "*11 + "║")
     print("╚" + "="*58 + "╝")
     
-    imu = ImuSoftUart(rx_gpio=24, baudrate=57600)
+    imu = ImuSoftUart(rx_gpio=24, baudrate=80000)
     imu.open()
     
     try:

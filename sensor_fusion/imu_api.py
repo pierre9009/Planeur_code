@@ -21,7 +21,7 @@ def crc16_ccitt(data: bytes, init: int = 0xFFFF) -> int:
     return crc
 
 class ImuSoftUart:
-    def __init__(self, rx_gpio: int = 24, baudrate: int = 115200):
+    def __init__(self, rx_gpio: int = 24, baudrate: int = 80000):
         self.rx_gpio = rx_gpio
         self.baudrate = baudrate
         self.pi = None
