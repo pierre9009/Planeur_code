@@ -35,7 +35,7 @@ class ImuSoftUart:
             raise RuntimeError("pigpio not connected. Start pigpiod (sudo systemctl start pigpiod)")
 
         self.pi.set_mode(self.rx_gpio, pigpio.INPUT)
-        self.pi.set_pull_up_down(self.rx_gpio, pigpio.PUD_OFF)
+        self.pi.set_pull_up_down(self.rx_gpio, pigpio.PUD_UP)
 
         try:
             self.pi.bb_serial_read_close(self.rx_gpio)
