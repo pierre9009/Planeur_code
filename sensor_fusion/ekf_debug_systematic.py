@@ -8,7 +8,7 @@ import time
 import json
 import sys
 import numpy as np
-from imu_api import ImuSoftUart
+from imu_api import ImuHardwareUart
 from ahrs.filters import EKF
 from ahrs.common.orientation import am2q, q2euler
 
@@ -29,7 +29,7 @@ def step1_validate_communication():
     print("⏱️  Durée: 10 secondes")
     print("📍 Gardez le capteur immobile\n")
     
-    imu = ImuSoftUart(rx_gpio=24, baudrate=80000)
+    imu = ImuHardwareUart(port="/dev/ttyS0", baudrate=115200)
     imu.open()
     
     try:
@@ -186,7 +186,7 @@ def step3_validate_initialization():
     print("="*70)
     print("📍 Positionnez le capteur à PLAT sur une table\n")
     
-    imu = ImuSoftUart(rx_gpio=24, baudrate=80000)
+    imu = ImuHardwareUart(port="/dev/ttyS0", baudrate=115200)
     imu.open()
     
     try:
