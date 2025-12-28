@@ -250,20 +250,7 @@ def run_fusion(args):
         if args.baudrate:
             config.uart.baudrate = args.baudrate
     except Exception:
-        # Create minimal config
-        from dataclasses import dataclass
-
-        @dataclass
-        class UartConfig:
-            port: str = args.port or '/dev/ttyAMA0'
-            baudrate: int = args.baudrate or 115200
-            timeout_s: float = 0.1
-
-        @dataclass
-        class MinConfig:
-            uart: UartConfig = None
-
-        config = MinConfig(uart=UartConfig())
+        print("error")
 
     # Load temperature calibration if available
     temp_cal = None
