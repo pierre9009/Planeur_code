@@ -8,7 +8,7 @@ uart:
   write_timeout_s: 1.0
 
 sensor:
-  sample_rate_hz: 50
+  sample_rate_hz: 100
   # Expected ranges for validation
   accelerometer:
     range_g: 8.0  # Maximum expected acceleration in g
@@ -58,7 +58,7 @@ magnetometer:
 monitoring:
   # Performance tracking
   loop_timing:
-    target_hz: 50
+    target_hz: 100
     jitter_warning_ms: 5.0
   # Statistics window
   window_size: 1000
