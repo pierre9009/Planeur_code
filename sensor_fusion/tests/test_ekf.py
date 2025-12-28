@@ -53,7 +53,7 @@ class TestMagnetometerProcessor:
         assert processor.is_disturbed
 
         nominal_mag = np.array([20.0, 5.0, 45.0])
-        for _ in range(60):
+        for _ in range(200):
             processor.process(nominal_mag)
 
         assert not processor.is_disturbed

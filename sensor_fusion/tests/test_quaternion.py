@@ -168,7 +168,7 @@ class TestQuaternionOps:
 
     def test_multiply_inverse(self):
         """Multiplying quaternion by conjugate should give identity."""
-        q = Quaternion(w=0.7071, x=0.0, y=0.7071, z=0.0)
+        q = Quaternion(w=0.7071067811865476, x=0.0, y=0.7071067811865476, z=0.0)
         q_conj = QuaternionOps.conjugate(q)
         result = QuaternionOps.multiply(q, q_conj)
 
