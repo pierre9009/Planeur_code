@@ -1,3 +1,4 @@
+# Core dependencies
 pyserial
 numpy
 ahrs
@@ -5,3 +6,9 @@ flask
 flask-socketio
 pigpio
 scipy
+pyyaml
+
+# Development/testing dependencies
+pytest
+pytest-cov
+mypy

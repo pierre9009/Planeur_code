@@ -1,0 +1,70 @@
+# IMU Sensor Fusion Configuration
+# All values use SI units unless otherwise specified
+
+uart:
+  port: "/dev/ttyS0"
+  baudrate: 115200
+  timeout_s: 0.1
+  write_timeout_s: 1.0
+
+sensor:
+  sample_rate_hz: 100
+  # Expected ranges for validation
+  accelerometer:
+    range_g: 16.0  # Maximum expected acceleration in g
+    gravity_nominal: 9.81  # m/s^2
+    gravity_tolerance: 0.5  # m/s^2, allowed deviation from nominal
+  gyroscope:
+    range_dps: 2000.0  # Maximum expected angular rate in deg/s
+    stationary_threshold_dps: 5.0  # Threshold to consider stationary
+  magnetometer:
+    range_ut: 4900.0  # Maximum expected field strength in uT
+    min_field_ut: 20.0  # Minimum valid field strength
+    max_field_ut: 100.0  # Maximum valid field strength (typical Earth field)
+
+ekf:
+  frame: "NED"
+  # Process noise covariances
+  noise:
+    gyroscope: 0.3  # rad/s
+    accelerometer: 0.5  # m/s^2
+    magnetometer: 0.8  # uT
+  # Initial quaternion (identity if not specified)
+  initialization:
+    num_samples: 100  # Samples for initial averaging
+    min_samples: 50  # Minimum acceptable samples
+    max_tilt_deg: 30.0  # Warning threshold for initial tilt
+
+validation:
+  quaternion:
+    norm_tolerance: 0.01  # Acceptable deviation from unit norm
+    divergence_threshold: 0.1  # Threshold to trigger re-initialization
+  timestamp:
+    max_dt_s: 0.1  # Maximum acceptable time step
+    min_dt_s: 0.001  # Minimum acceptable time step
+
+magnetometer:
+  # Disturbance detection parameters
+  disturbance:
+    field_magnitude_tolerance: 0.15  # 15% deviation from reference
+    update_rate: 0.01  # Low-pass filter for reference field
+    recovery_samples: 50  # Samples before trusting mag again
+  # Adaptive trust
+  trust:
+    nominal: 1.0
+    disturbed: 0.1
+    recovery_rate: 0.02
+
+monitoring:
+  # Performance tracking
+  loop_timing:
+    target_hz: 100
+    jitter_warning_ms: 5.0
+  # Statistics window
+  window_size: 1000
+  log_interval_s: 10.0
+
+web:
+  host: "0.0.0.0"
+  port: 5000
+  emit_rate_hz: 10  # Rate at which to emit orientation updates
