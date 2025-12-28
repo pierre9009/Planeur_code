@@ -258,6 +258,7 @@ def run_fusion(args):
             port: str = args.port or '/dev/ttyS00'
             baudrate: int = args.baudrate or 115200
             timeout_s: float = 0.1
+            write_timeout_s: float = 0.1
 
         @dataclass
         class MinConfig:
@@ -294,7 +295,7 @@ def run_fusion(args):
     print(f"Connecting to {config.uart.port} at {config.uart.baudrate} baud...")
 
     try:
-        with ImuUart(config.uart) as imu:
+        with ImuUart(config) as imu:
             print("Connected. Starting fusion...")
 
             # Initialize from stationary data
