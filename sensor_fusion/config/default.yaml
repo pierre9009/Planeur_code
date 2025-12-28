@@ -8,14 +8,14 @@ uart:
   write_timeout_s: 1.0
 
 sensor:
-  sample_rate_hz: 100
+  sample_rate_hz: 70
   # Expected ranges for validation
   accelerometer:
-    range_g: 16.0  # Maximum expected acceleration in g
+    range_g: 8.0  # Maximum expected acceleration in g
     gravity_nominal: 9.81  # m/s^2
     gravity_tolerance: 0.5  # m/s^2, allowed deviation from nominal
   gyroscope:
-    range_dps: 2000.0  # Maximum expected angular rate in deg/s
+    range_dps: 500.0  # Maximum expected angular rate in deg/s
     stationary_threshold_dps: 5.0  # Threshold to consider stationary
   magnetometer:
     range_ut: 4900.0  # Maximum expected field strength in uT
@@ -58,7 +58,7 @@ magnetometer:
 monitoring:
   # Performance tracking
   loop_timing:
-    target_hz: 100
+    target_hz: 70
     jitter_warning_ms: 5.0
   # Statistics window
   window_size: 1000
