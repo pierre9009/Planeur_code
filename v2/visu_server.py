@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Serveur de visualisation IMU - WebSocket + subprocess main_fusion.py
-Usage: python visu_server.py [--host HOST] [--port PORT]
+Usage: python visu_server.py [--host HOST] [--port PORT] [--debug]
 """
 
 import argparse
@@ -9,6 +9,7 @@ import json
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 from flask import Flask, render_template_string
@@ -16,9 +17,10 @@ from flask_socketio import SocketIO
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "imu_visu"
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 fusion_process = None
+DEBUG_MODE = False
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -55,6 +57,11 @@ HTML_TEMPLATE = """
         <div>Pitch: <span class="value" id="pitch">0.00</span>°</div>
         <div>Yaw: <span class="value" id="yaw">0.00</span>°</div>
         <div>Hz: <span class="value" id="hz">0</span></div>
+        <div id="latency-info" style="display:none; border-top: 1px solid #444; margin-top: 10px; padding-top: 10px;">
+            <div>Latency: <span class="value" id="latency">-</span> ms</div>
+            <div>IMU read: <span class="value" id="t_read">-</span> ms</div>
+            <div>EKF: <span class="value" id="t_ekf">-</span> ms</div>
+        </div>
         <div>Status: <span id="status">Disconnected</span></div>
     </div>
 
@@ -146,6 +153,21 @@ HTML_TEMPLATE = """
                 document.getElementById('yaw').textContent = data.yaw.toFixed(1);
             }
 
+            // Latency info (debug mode)
+            if (data.t_send !== undefined) {
+                document.getElementById('latency-info').style.display = 'block';
+                const latency = Date.now() - data.t_send;
+                document.getElementById('latency').textContent = latency.toFixed(0);
+                document.getElementById('t_read').textContent = data.t_read_ms.toFixed(2);
+                document.getElementById('t_ekf').textContent = data.t_ekf_ms.toFixed(2);
+
+                // Color code latency
+                const el = document.getElementById('latency');
+                if (latency < 20) el.style.color = '#4ade80';
+                else if (latency < 50) el.style.color = '#fbbf24';
+                else el.style.color = '#f87171';
+            }
+
             // Hz counter
             updateCount++;
             const now = Date.now();
@@ -209,10 +231,13 @@ def read_fusion_stderr(process):
 
 def start_fusion():
     """Démarre main_fusion.py en subprocess"""
-    global fusion_process
+    global fusion_process, DEBUG_MODE
 
     script_dir = Path(__file__).parent
     cmd = [sys.executable, str(script_dir / "main_fusion.py")]
+
+    if DEBUG_MODE:
+        cmd.append("--debug")
 
     print(f"Starting: {' '.join(cmd)}")
 
@@ -241,10 +266,17 @@ def stop_fusion():
 
 
 def main():
+    global DEBUG_MODE
+
     parser = argparse.ArgumentParser(description="IMU Visualization Server")
     parser.add_argument("--host", default="0.0.0.0", help="Host (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=5000, help="Port (default: 5000)")
+    parser.add_argument("--debug", action="store_true", help="Enable latency debugging")
     args = parser.parse_args()
+
+    DEBUG_MODE = args.debug
+    if DEBUG_MODE:
+        print("DEBUG MODE: Latency timestamps enabled")
 
     start_fusion()
 

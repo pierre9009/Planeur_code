@@ -54,41 +54,46 @@ class ImuReader:
     
     def read(self, timeout: float = 1.0):
         """Lit une mesure IMU. Retourne dict ou None si timeout."""
-        t0 = time.time()
-        
-        while time.time() - t0 < timeout:
-            # Lire données disponibles
-            if self.ser.in_waiting > 0:
-                self.buf.extend(self.ser.read(self.ser.in_waiting))
-            
-            # Chercher sync
+        t0 = time.perf_counter()
+
+        while time.perf_counter() - t0 < timeout:
+            # Lire données disponibles - bloquant avec petit timeout
+            waiting = self.ser.in_waiting
+            if waiting > 0:
+                self.buf.extend(self.ser.read(waiting))
+            else:
+                # Attendre un peu si pas de données (évite busy-wait CPU 100%)
+                time.sleep(0.0005)  # 0.5ms
+                continue
+
+            # Chercher sync et parser
             while True:
                 idx = self.buf.find(bytes([SYNC1, SYNC2]))
                 if idx < 0:
                     if len(self.buf) > 1:
                         self.buf = self.buf[-1:]
                     break
-                
+
                 if idx > 0:
                     del self.buf[:idx]
-                
+
                 # Paquet complet ?
                 if len(self.buf) < 2 + PACKET_SIZE:
                     break
-                
+
                 payload = bytes(self.buf[2:2 + PACKET_SIZE])
                 del self.buf[:2 + PACKET_SIZE]
-                
+
                 # Vérifier CRC
                 rx_crc = struct.unpack_from("<H", payload, -2)[0]
                 calc_crc = crc16_ccitt(payload[:-2])
-                
+
                 if rx_crc != calc_crc:
                     continue
-                
+
                 # Décoder
                 seq, ax, ay, az, gx, gy, gz, mx, my, mz, tempC, _ = struct.unpack(PACKET_FMT, payload)
-                
+
                 return {
                     "seq": seq,
                     "ax": ax, "ay": ay, "az": az,
@@ -96,9 +101,7 @@ class ImuReader:
                     "mx": mx, "my": my, "mz": mz,
                     "tempC": tempC
                 }
-            
-            time.sleep(0.001)
-        
+
         return None
     
     def __enter__(self):
@@ -165,11 +168,13 @@ def validate_imu(port: str = "/dev/ttyS0", duration: float = 5.0):
     return True
 
 
-# Test au chargement du module
-validate_imu()
+# NE PAS valider automatiquement à l'import - trop lent (5s)
+# Appeler validate_imu() explicitement si nécessaire
 
 
 if __name__ == "__main__":
+    # Validation seulement si exécuté directement
+    validate_imu()
     print("\nLecture continue (Ctrl+C pour arrêter)...")
     
     with ImuReader() as imu:
