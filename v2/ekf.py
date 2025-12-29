@@ -52,7 +52,7 @@ class EKF:
         self.process_noise = np.diag([0.05, 0.05, 0.05, 0.05, 0.01, 0.01, 0.01])
 
         # Measurement noise R (3x3)
-        self.measurement_noise = np.diag([0.02, 0.02, 0.02])
+        self.measurement_noise = np.diag([0.1, 0.1, 0.1])
 
     def predict(self, gyro: np.ndarray, dt: float):
         """
