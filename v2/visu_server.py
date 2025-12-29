@@ -84,17 +84,17 @@ HTML_PAGE = """<!DOCTYPE html>
         );
         planeGroup.add(wings);
         
-        // Empennage vertical
+        // Empennage vertical (tourné de 90°)
         const tailVert = new THREE.Mesh(
-            new THREE.BoxGeometry(0.1, 1, 0.8),
+            new THREE.BoxGeometry(0.8, 1, 0.1),
             new THREE.MeshPhongMaterial({ color: 0x3a7bc8 })
         );
         tailVert.position.set(-1.3, 0.5, 0);
         planeGroup.add(tailVert);
         
-        // Empennage horizontal
+        // Empennage horizontal (tourné de 90°)
         const tailHoriz = new THREE.Mesh(
-            new THREE.BoxGeometry(2, 0.1, 0.6),
+            new THREE.BoxGeometry(0.6, 0.1, 2),
             new THREE.MeshPhongMaterial({ color: 0x3a7bc8 })
         );
         tailHoriz.position.set(-1.3, 0.8, 0);
@@ -132,7 +132,10 @@ HTML_PAGE = """<!DOCTYPE html>
         });
         
         socket.on('orientation', (data) => {
-            planeGroup.quaternion.set(data.qx, data.qy, data.qz, data.qw);
+            // Correction axes: pitch était affiché comme yaw
+            // EKF: X=avant, Y=droite, Z=bas (NED)
+            // Three.js: X=droite, Y=haut, Z=avant
+            planeGroup.quaternion.set(data.qz, -data.qx, data.qy, data.qw);
             document.getElementById('roll-value').textContent = data.roll.toFixed(2) + '°';
             document.getElementById('pitch-value').textContent = data.pitch.toFixed(2) + '°';
             document.getElementById('yaw-value').textContent = data.yaw.toFixed(2) + '°';

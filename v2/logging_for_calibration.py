@@ -3,7 +3,7 @@
 
 import imu_reader
 
-with open("imu_data.log", "w") as f, imu_reader.ImuReader() as imu:
+with open("/calibration/imu_data.log", "w") as f, imu_reader.ImuReader() as imu:
     print("Enregistrement dans imu_data.log (Ctrl+C pour arrêter)...")
     while True:
         m = imu.read()
