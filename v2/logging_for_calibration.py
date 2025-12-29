@@ -10,3 +10,4 @@ with open("/calibration/imu_data.log", "w") as f, imu_reader.ImuReader() as imu:
         if m:
             f.write(f"{m['ax']} {m['ay']} {m['az']} {m['gx']} {m['gy']} {m['gz']}\n")
             f.flush()
+            print(f"{m['ax']} {m['ay']} {m['az']} {m['gx']} {m['gy']} {m['gz']}\n")
