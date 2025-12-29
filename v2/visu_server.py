@@ -15,7 +15,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FUSION_SCRIPT = os.path.join(SCRIPT_DIR, "main_fusion.py")
 
 # Fréquence d'envoi WebSocket (Hz) - plus bas = moins de latence réseau
-WS_SEND_RATE = 30
+WS_SEND_RATE = 10
 
 
 class FusionBridge:
