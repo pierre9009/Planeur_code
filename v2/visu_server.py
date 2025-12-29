@@ -1,90 +1,104 @@
 #!/usr/bin/env python3
-"""Serveur WebSocket pour visualisation 3D du planeur"""
+"""Serveur WebSocket pour visualisation 3D - Lance main_fusion.py en subprocess"""
 
 import asyncio
-import json
-import time
-import numpy as np
+import subprocess
+import sys
+import os
 import websockets
-import imu_reader
-from ekf import EKF
 
-DT = 0.01  # 100 Hz
+# Chemin vers main_fusion.py (même répertoire)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+FUSION_SCRIPT = os.path.join(SCRIPT_DIR, "main_fusion.py")
 
-async def fusion_loop(websocket):
-    """Boucle de fusion IMU et envoi des quaternions via WebSocket"""
 
-    with imu_reader.ImuReader() as imu:
-        # Première mesure pour initialiser l'EKF
-        m = imu.read()
-        while m is None:
-            m = imu.read()
+class FusionBridge:
+    """Pont entre le subprocess de fusion et les clients WebSocket"""
 
-        accel = np.array([m["ax"], m["ay"], m["az"]])
-        ekf = EKF(accel_data=accel)
+    def __init__(self):
+        self.process = None
+        self.clients = set()
+        self.latest_data = None
 
-        print("Fusion IMU démarrée")
-        last_time = time.time()
+    async def start_fusion(self):
+        """Démarre main_fusion.py en subprocess"""
+        print(f"Lancement de {FUSION_SCRIPT}")
 
+        self.process = await asyncio.create_subprocess_exec(
+            sys.executable, FUSION_SCRIPT,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        # Attendre READY sur stderr
+        line = await self.process.stderr.readline()
+        if b"READY" in line:
+            print("Fusion IMU prête")
+        else:
+            print(f"Message fusion: {line.decode().strip()}")
+
+        # Lancer la lecture du stdout
+        asyncio.create_task(self.read_fusion_output())
+
+    async def read_fusion_output(self):
+        """Lit les données JSON depuis main_fusion.py et les diffuse"""
         while True:
-            m = imu.read()
-            if m is None:
-                await asyncio.sleep(0.001)
-                continue
-
-            # Calcul du dt réel
-            now = time.time()
-            dt = now - last_time
-            last_time = now
-
-            # Données capteurs
-            gyro = np.array([m["gx"], m["gy"], m["gz"]])
-            accel = np.array([m["ax"], m["ay"], m["az"]])
-
-            # EKF predict + update
-            ekf.predict(gyro, dt)
-            ekf.update(accel)
-
-            # Quaternion [w, x, y, z] depuis l'EKF
-            q = ekf.state[0:4]
-
-            # Envoyer au format JSON pour Three.js
-            # Three.js: Quaternion(x, y, z, w) et convention Y-up
-            # Notre EKF: [w, x, y, z] en NED (X=avant, Y=droite, Z=bas)
-            # Conversion NED -> Three.js (Y-up, Z-arrière):
-            # x_three = x_ned, y_three = -z_ned, z_three = -y_ned
-            data = {
-                "qw": float(q[0]),
-                "qx": float(q[1]),
-                "qy": float(-q[3]),  # -z_ned -> y_three
-                "qz": float(-q[2])   # -y_ned -> z_three
-            }
-
-            try:
-                await websocket.send(json.dumps(data))
-            except websockets.ConnectionClosed:
-                print("Client déconnecté")
+            line = await self.process.stdout.readline()
+            if not line:
+                print("Subprocess fusion terminé")
                 break
 
-            await asyncio.sleep(DT)
+            self.latest_data = line.decode().strip()
 
+            # Diffuser à tous les clients connectés
+            if self.clients:
+                await asyncio.gather(
+                    *[self.send_to_client(client) for client in self.clients],
+                    return_exceptions=True
+                )
 
-async def handler(websocket, path=None):
-    """Gestionnaire de connexion WebSocket"""
-    print(f"Client connecté")
-    try:
-        await fusion_loop(websocket)
-    except Exception as e:
-        print(f"Erreur: {e}")
-    finally:
-        print("Connexion fermée")
+    async def send_to_client(self, client):
+        """Envoie les dernières données à un client"""
+        try:
+            await client.send(self.latest_data)
+        except websockets.ConnectionClosed:
+            self.clients.discard(client)
+
+    async def handle_client(self, websocket, path=None):
+        """Gère une connexion client WebSocket"""
+        print(f"Client connecté ({len(self.clients) + 1} clients)")
+        self.clients.add(websocket)
+
+        try:
+            # Garder la connexion ouverte
+            async for _ in websocket:
+                pass
+        except websockets.ConnectionClosed:
+            pass
+        finally:
+            self.clients.discard(websocket)
+            print(f"Client déconnecté ({len(self.clients)} clients)")
+
+    def stop(self):
+        """Arrête le subprocess"""
+        if self.process:
+            self.process.terminate()
 
 
 async def main():
-    print("Démarrage du serveur WebSocket sur ws://0.0.0.0:8765")
-    async with websockets.serve(handler, "0.0.0.0", 8765):
+    bridge = FusionBridge()
+
+    # Démarrer la fusion
+    await bridge.start_fusion()
+
+    # Démarrer le serveur WebSocket
+    print("Serveur WebSocket sur ws://0.0.0.0:8765")
+    async with websockets.serve(bridge.handle_client, "0.0.0.0", 8765):
         await asyncio.Future()  # Run forever
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nArrêt")

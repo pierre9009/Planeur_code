@@ -110,7 +110,7 @@
         let targetQuat = new THREE.Quaternion();
 
         function connect() {
-            ws = new WebSocket('ws://localhost:8765');
+            ws = new WebSocket('ws://192.168.1.128:8765');
 
             ws.onopen = () => {
                 statusEl.textContent = 'Connecté';
