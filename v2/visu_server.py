@@ -2,14 +2,20 @@
 """Serveur WebSocket pour visualisation 3D - Lance main_fusion.py en subprocess"""
 
 import asyncio
-import subprocess
 import sys
 import os
 import websockets
+import logging
+
+# Réduire les logs websockets (erreurs de connexion bénignes)
+logging.getLogger('websockets').setLevel(logging.ERROR)
 
 # Chemin vers main_fusion.py (même répertoire)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FUSION_SCRIPT = os.path.join(SCRIPT_DIR, "main_fusion.py")
+
+# Fréquence d'envoi WebSocket (Hz) - plus bas = moins de latence réseau
+WS_SEND_RATE = 30
 
 
 class FusionBridge:
@@ -25,7 +31,7 @@ class FusionBridge:
         print(f"Lancement de {FUSION_SCRIPT}")
 
         self.process = await asyncio.create_subprocess_exec(
-            sys.executable, FUSION_SCRIPT,
+            sys.executable, "-u", FUSION_SCRIPT,  # -u = unbuffered
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -37,32 +43,39 @@ class FusionBridge:
         else:
             print(f"Message fusion: {line.decode().strip()}")
 
-        # Lancer la lecture du stdout
+        # Lancer la lecture du stdout (consomme sans bloquer)
         asyncio.create_task(self.read_fusion_output())
 
+        # Lancer l'envoi périodique aux clients
+        asyncio.create_task(self.broadcast_loop())
+
     async def read_fusion_output(self):
-        """Lit les données JSON depuis main_fusion.py et les diffuse"""
+        """Lit les données JSON depuis main_fusion.py (consomme en continu)"""
         while True:
             line = await self.process.stdout.readline()
             if not line:
                 print("Subprocess fusion terminé")
                 break
-
+            # Stocke uniquement la dernière valeur
             self.latest_data = line.decode().strip()
 
-            # Diffuser à tous les clients connectés
-            if self.clients:
-                await asyncio.gather(
-                    *[self.send_to_client(client) for client in self.clients],
-                    return_exceptions=True
-                )
+    async def broadcast_loop(self):
+        """Envoie les données aux clients à fréquence fixe"""
+        interval = 1.0 / WS_SEND_RATE
 
-    async def send_to_client(self, client):
-        """Envoie les dernières données à un client"""
-        try:
-            await client.send(self.latest_data)
-        except websockets.ConnectionClosed:
-            self.clients.discard(client)
+        while True:
+            if self.latest_data and self.clients:
+                # Envoyer à tous les clients en parallèle
+                dead_clients = set()
+                for client in self.clients:
+                    try:
+                        await client.send(self.latest_data)
+                    except websockets.ConnectionClosed:
+                        dead_clients.add(client)
+
+                self.clients -= dead_clients
+
+            await asyncio.sleep(interval)
 
     async def handle_client(self, websocket, path=None):
         """Gère une connexion client WebSocket"""
@@ -70,7 +83,6 @@ class FusionBridge:
         self.clients.add(websocket)
 
         try:
-            # Garder la connexion ouverte
             async for _ in websocket:
                 pass
         except websockets.ConnectionClosed:
@@ -92,9 +104,9 @@ async def main():
     await bridge.start_fusion()
 
     # Démarrer le serveur WebSocket
-    print("Serveur WebSocket sur ws://0.0.0.0:8765")
+    print(f"Serveur WebSocket sur ws://0.0.0.0:8765 ({WS_SEND_RATE}Hz)")
     async with websockets.serve(bridge.handle_client, "0.0.0.0", 8765):
-        await asyncio.Future()  # Run forever
+        await asyncio.Future()
 
 
 if __name__ == "__main__":
