@@ -129,21 +129,17 @@
 
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
-                // Three.js: Quaternion(x, y, z, w)
-                targetQuat.set(data.qx, data.qy, data.qz, data.qw);
+                // Application directe du quaternion (pas d'interpolation = pas de latence)
+                glider.quaternion.set(data.qx, data.qy, data.qz, data.qw);
                 quatEl.textContent = `q=[${data.qw.toFixed(3)}, ${data.qx.toFixed(3)}, ${data.qy.toFixed(3)}, ${data.qz.toFixed(3)}]`;
             };
         }
 
         connect();
 
-        // Animation
+        // Animation (rendu uniquement)
         function animate() {
             requestAnimationFrame(animate);
-
-            // Interpolation douce vers le quaternion cible
-            glider.quaternion.slerp(targetQuat, 0.3);
-
             renderer.render(scene, camera);
         }
 
