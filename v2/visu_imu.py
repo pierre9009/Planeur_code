@@ -116,7 +116,7 @@ class QuaternionBroadcaster:
         self.latest_quat = {"w": 1, "x": 0, "y": 0, "z": 0}
         self.lock = threading.Lock()
 
-    async def handler(self, websocket, path):
+    async def handler(self, websocket):
         self.clients.add(websocket)
         try:
             async for _ in websocket:
