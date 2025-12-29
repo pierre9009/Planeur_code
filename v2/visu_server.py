@@ -1,293 +1,229 @@
 #!/usr/bin/env python3
-"""
-Serveur de visualisation IMU - WebSocket + subprocess main_fusion.py
-Usage: python visu_server.py [--host HOST] [--port PORT] [--debug]
-"""
+"""Serveur de visualisation IMU avec Flask-SocketIO"""
 
-import argparse
-import json
-import subprocess
-import sys
-import threading
 import time
-from pathlib import Path
-
+import threading
+import numpy as np
+from scipy.spatial.transform import Rotation
 from flask import Flask, render_template_string
 from flask_socketio import SocketIO
 
+import imu_reader
+from ekf import EKF
+
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "imu_visu"
+app.config['SECRET_KEY'] = 'imu_secret'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
-fusion_process = None
-DEBUG_MODE = False
-
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html>
+HTML_PAGE = """<!DOCTYPE html>
+<html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>IMU Visualisation</title>
+    <title>Visualisation IMU 3D</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: monospace;
-            background: #1a1a2e;
-            color: white;
-            overflow: hidden;
-        }
-        #info {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            background: rgba(0,0,0,0.7);
-            padding: 15px;
-            border-radius: 8px;
-            z-index: 100;
-        }
-        #info div { margin: 5px 0; }
-        .value { color: #4ade80; }
-        #status { color: #f87171; }
-        #status.ok { color: #4ade80; }
+        body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); overflow: hidden; color: white; }
+        #container { width: 100vw; height: 100vh; display: flex; flex-direction: column; }
+        #header { padding: 20px; background: rgba(0,0,0,0.3); backdrop-filter: blur(10px); }
+        h1 { font-size: 28px; font-weight: 300; letter-spacing: 2px; }
+        #canvas-container { flex: 1; position: relative; }
+        #info-panel { position: absolute; top: 20px; left: 20px; background: rgba(0,0,0,0.7); backdrop-filter: blur(10px); padding: 20px; border-radius: 10px; min-width: 280px; }
+        .data-row { display: flex; justify-content: space-between; margin: 10px 0; font-size: 16px; }
+        .label { font-weight: 600; color: #a0aec0; }
+        .value { font-family: 'Courier New', monospace; color: #4ade80; font-weight: bold; }
+        .status { margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.2); font-size: 14px; }
+        .connected { color: #4ade80; }
+        .disconnected { color: #f87171; }
     </style>
 </head>
 <body>
-    <div id="info">
-        <div>Roll: <span class="value" id="roll">0.00</span>°</div>
-        <div>Pitch: <span class="value" id="pitch">0.00</span>°</div>
-        <div>Yaw: <span class="value" id="yaw">0.00</span>°</div>
-        <div>Hz: <span class="value" id="hz">0</span></div>
-        <div id="latency-info" style="display:none; border-top: 1px solid #444; margin-top: 10px; padding-top: 10px;">
-            <div>Latency: <span class="value" id="latency">-</span> ms</div>
-            <div>IMU read: <span class="value" id="t_read">-</span> ms</div>
-            <div>EKF: <span class="value" id="t_ekf">-</span> ms</div>
+    <div id="container">
+        <div id="header"><h1>🛩️ VISUALISATION CENTRALE INERTIELLE</h1></div>
+        <div id="canvas-container"></div>
+        <div id="info-panel">
+            <div class="data-row"><span class="label">Roll:</span><span class="value" id="roll-value">0.00°</span></div>
+            <div class="data-row"><span class="label">Pitch:</span><span class="value" id="pitch-value">0.00°</span></div>
+            <div class="data-row"><span class="label">Yaw:</span><span class="value" id="yaw-value">0.00°</span></div>
+            <div class="data-row"><span class="label">Hz:</span><span class="value" id="hz-value">0</span></div>
+            <div class="status">État: <span id="status" class="disconnected">Déconnecté</span></div>
         </div>
-        <div>Status: <span id="status">Disconnected</span></div>
     </div>
-
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <script>
-        // Three.js setup
+        const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x1a1a2e);
-
-        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
         camera.position.set(0, 3, 8);
         camera.lookAt(0, 0, 0);
-
         const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
 
-        // Lights
-        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-        const light = new THREE.DirectionalLight(0xffffff, 0.8);
-        light.position.set(5, 10, 5);
-        scene.add(light);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(5, 10, 5);
+        scene.add(dirLight);
 
-        // Glider
-        const glider = new THREE.Group();
-
+        const planeGroup = new THREE.Group();
+        
         // Fuselage
-        const fuseMat = new THREE.MeshPhongMaterial({ color: 0x4a90e2 });
-        const fuse = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 3, 12), fuseMat);
-        fuse.rotation.z = Math.PI / 2;
-        glider.add(fuse);
-
-        // Nose
-        const noseMat = new THREE.MeshPhongMaterial({ color: 0xe74c3c });
-        const nose = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 12), noseMat);
+        const fuselage = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.3, 0.3, 3, 16),
+            new THREE.MeshPhongMaterial({ color: 0x4a90e2, shininess: 100 })
+        );
+        fuselage.rotation.z = Math.PI / 2;
+        planeGroup.add(fuselage);
+        
+        // Ailes
+        const wings = new THREE.Mesh(
+            new THREE.BoxGeometry(1, 0.1, 6),
+            new THREE.MeshPhongMaterial({ color: 0x5aa3e8 })
+        );
+        planeGroup.add(wings);
+        
+        // Empennage vertical
+        const tailVert = new THREE.Mesh(
+            new THREE.BoxGeometry(0.1, 1, 0.8),
+            new THREE.MeshPhongMaterial({ color: 0x3a7bc8 })
+        );
+        tailVert.position.set(-1.3, 0.5, 0);
+        planeGroup.add(tailVert);
+        
+        // Empennage horizontal
+        const tailHoriz = new THREE.Mesh(
+            new THREE.BoxGeometry(2, 0.1, 0.6),
+            new THREE.MeshPhongMaterial({ color: 0x3a7bc8 })
+        );
+        tailHoriz.position.set(-1.3, 0.8, 0);
+        planeGroup.add(tailHoriz);
+        
+        // Nez
+        const nose = new THREE.Mesh(
+            new THREE.SphereGeometry(0.3, 16, 16),
+            new THREE.MeshPhongMaterial({ color: 0xe74c3c })
+        );
         nose.position.x = 1.5;
-        nose.scale.set(1.5, 1, 1);
-        glider.add(nose);
+        nose.scale.set(1.2, 1, 1);
+        planeGroup.add(nose);
+        
+        planeGroup.add(new THREE.AxesHelper(5));
+        scene.add(planeGroup);
+        
+        scene.add(new THREE.GridHelper(20, 20, 0x4a5568, 0x2d3748));
+        const axes = new THREE.AxesHelper(3);
+        axes.position.y = -2;
+        scene.add(axes);
 
-        // Wings
-        const wingMat = new THREE.MeshPhongMaterial({ color: 0x5aa3e8 });
-        const wing = new THREE.Mesh(new THREE.BoxGeometry(1, 0.05, 6), wingMat);
-        glider.add(wing);
-
-        // Horizontal tail
-        const tailH = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 1.5), wingMat);
-        tailH.position.x = -1.3;
-        glider.add(tailH);
-
-        // Vertical tail
-        const tailV = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.8, 0.05), fuseMat);
-        tailV.position.set(-1.3, 0.4, 0);
-        glider.add(tailV);
-
-        scene.add(glider);
-
-        // Grid
-        const grid = new THREE.GridHelper(20, 20, 0x4a5568, 0x2d3748);
-        grid.position.y = -2;
-        scene.add(grid);
-
-        // Axes
-        scene.add(new THREE.AxesHelper(2));
-
-        // WebSocket
         const socket = io();
-        let lastUpdate = Date.now();
-        let updateCount = 0;
-
+        let lastUpdate = performance.now();
+        let frameCount = 0;
+        
         socket.on('connect', () => {
-            document.getElementById('status').textContent = 'Connected';
-            document.getElementById('status').className = 'ok';
+            document.getElementById('status').textContent = 'Connecté';
+            document.getElementById('status').className = 'connected';
         });
-
+        
         socket.on('disconnect', () => {
-            document.getElementById('status').textContent = 'Disconnected';
-            document.getElementById('status').className = '';
+            document.getElementById('status').textContent = 'Déconnecté';
+            document.getElementById('status').className = 'disconnected';
         });
-
+        
         socket.on('orientation', (data) => {
-            // Apply quaternion directly
-            glider.quaternion.set(data.qx, data.qy, data.qz, data.qw);
-
-            // Update display
-            if (data.roll !== undefined) {
-                document.getElementById('roll').textContent = data.roll.toFixed(1);
-                document.getElementById('pitch').textContent = data.pitch.toFixed(1);
-                document.getElementById('yaw').textContent = data.yaw.toFixed(1);
-            }
-
-            // Latency info (debug mode)
-            if (data.t_send !== undefined) {
-                document.getElementById('latency-info').style.display = 'block';
-                const latency = Date.now() - data.t_send;
-                document.getElementById('latency').textContent = latency.toFixed(0);
-                document.getElementById('t_read').textContent = data.t_read_ms.toFixed(2);
-                document.getElementById('t_ekf').textContent = data.t_ekf_ms.toFixed(2);
-
-                // Color code latency
-                const el = document.getElementById('latency');
-                if (latency < 20) el.style.color = '#4ade80';
-                else if (latency < 50) el.style.color = '#fbbf24';
-                else el.style.color = '#f87171';
-            }
-
-            // Hz counter
-            updateCount++;
-            const now = Date.now();
-            if (now - lastUpdate >= 1000) {
-                document.getElementById('hz').textContent = updateCount;
-                updateCount = 0;
+            planeGroup.quaternion.set(data.qx, data.qy, data.qz, data.qw);
+            document.getElementById('roll-value').textContent = data.roll.toFixed(2) + '°';
+            document.getElementById('pitch-value').textContent = data.pitch.toFixed(2) + '°';
+            document.getElementById('yaw-value').textContent = data.yaw.toFixed(2) + '°';
+            
+            frameCount++;
+            const now = performance.now();
+            if (now - lastUpdate > 1000) {
+                document.getElementById('hz-value').textContent = frameCount;
+                frameCount = 0;
                 lastUpdate = now;
             }
         });
 
-        // Render loop
         function animate() {
             requestAnimationFrame(animate);
             renderer.render(scene, camera);
         }
         animate();
 
-        // Resize
         window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.aspect = container.clientWidth / container.clientHeight;
             camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setSize(container.clientWidth, container.clientHeight);
         });
     </script>
 </body>
-</html>
-"""
+</html>"""
 
 
-@app.route("/")
-def index():
-    return render_template_string(HTML_TEMPLATE)
+def imu_thread():
+    """Thread de lecture IMU et fusion EKF"""
+    with imu_reader.ImuReader() as imu:
+        m = imu.read()
+        while m is None:
+            m = imu.read()
 
+        accel = np.array([m["ax"], m["ay"], m["az"]])
+        ekf = EKF(accel_data=accel)
+        last_time = time.time()
 
-def read_fusion_stdout(process):
-    """Lit stdout de main_fusion.py et envoie via WebSocket"""
-    try:
-        for line in process.stdout:
-            line = line.strip()
-            if not line:
+        while True:
+            m = imu.read(timeout=0.1)
+            if m is None:
                 continue
-            try:
-                data = json.loads(line)
-                socketio.emit("orientation", data)
-            except json.JSONDecodeError:
-                pass
-    except Exception as e:
-        print(f"Stdout reader error: {e}")
+
+            now = time.time()
+            dt = now - last_time
+            last_time = now
+
+            gyro = np.array([m["gx"], m["gy"], m["gz"]])
+            accel = np.array([m["ax"], m["ay"], m["az"]])
+
+            ekf.predict(gyro, dt)
+            ekf.update(accel)
+
+            q = ekf.state[0:4]  # [w, x, y, z]
+            
+            # Calcul angles d'Euler pour affichage
+            rot = Rotation.from_quat([q[1], q[2], q[3], q[0]])  # scipy: [x,y,z,w]
+            euler = rot.as_euler('xyz', degrees=True)
+            
+            # Envoi immédiat via SocketIO
+            socketio.emit('orientation', {
+                'qw': float(q[0]),
+                'qx': float(q[1]),
+                'qy': float(q[2]),
+                'qz': float(q[3]),
+                'roll': float(euler[0]),
+                'pitch': float(euler[1]),
+                'yaw': float(euler[2])
+            })
 
 
-def read_fusion_stderr(process):
-    """Lit stderr pour les logs"""
-    try:
-        for line in process.stderr:
-            line = line.rstrip()
-            if line:
-                print(f"[FUSION] {line}")
-    except Exception:
-        pass
+@app.route('/')
+def index():
+    return render_template_string(HTML_PAGE)
 
 
-def start_fusion():
-    """Démarre main_fusion.py en subprocess"""
-    global fusion_process, DEBUG_MODE
-
-    script_dir = Path(__file__).parent
-    cmd = [sys.executable, str(script_dir / "main_fusion.py")]
-
-    if DEBUG_MODE:
-        cmd.append("--debug")
-
-    print(f"Starting: {' '.join(cmd)}")
-
-    fusion_process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1,
-        cwd=str(script_dir)
-    )
-
-    threading.Thread(target=read_fusion_stdout, args=(fusion_process,), daemon=True).start()
-    threading.Thread(target=read_fusion_stderr, args=(fusion_process,), daemon=True).start()
+@socketio.on('connect')
+def handle_connect():
+    print('Client connecté')
 
 
-def stop_fusion():
-    """Arrête le subprocess"""
-    global fusion_process
-    if fusion_process:
-        fusion_process.terminate()
-        try:
-            fusion_process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            fusion_process.kill()
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('Client déconnecté')
 
 
-def main():
-    global DEBUG_MODE
-
-    parser = argparse.ArgumentParser(description="IMU Visualization Server")
-    parser.add_argument("--host", default="0.0.0.0", help="Host (default: 0.0.0.0)")
-    parser.add_argument("--port", type=int, default=5000, help="Port (default: 5000)")
-    parser.add_argument("--debug", action="store_true", help="Enable latency debugging")
-    args = parser.parse_args()
-
-    DEBUG_MODE = args.debug
-    if DEBUG_MODE:
-        print("DEBUG MODE: Latency timestamps enabled")
-
-    start_fusion()
-
-    try:
-        print(f"Server: http://{args.host}:{args.port}")
-        socketio.run(app, host=args.host, port=args.port, debug=False, allow_unsafe_werkzeug=True)
-    except KeyboardInterrupt:
-        print("\nShutting down...")
-    finally:
-        stop_fusion()
-
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    threading.Thread(target=imu_thread, daemon=True).start()
+    print("\n" + "=" * 50)
+    print("http://0.0.0.0:5000")
+    print("=" * 50 + "\n")
+    socketio.run(app, host='0.0.0.0', port=5000, debug=False)
