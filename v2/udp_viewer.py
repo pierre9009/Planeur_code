@@ -159,13 +159,21 @@ def main():
     gluPerspective(45, display[0]/display[1], 0.1, 50.0)
     glTranslatef(0, 0, -8)
 
-    # Socket UDP non-bloquant
+    # Socket UDP non-bloquant avec buffer minimal
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 64)  # ~4 paquets max
     sock.bind(("", PORT))
     sock.setblocking(False)
 
     print(f"Listening on UDP port {PORT}...")
+
+    # Vide le buffer au démarrage
+    while True:
+        try:
+            sock.recvfrom(16)
+        except BlockingIOError:
+            break
 
     # État
     quat = [1.0, 0.0, 0.0, 0.0]  # w, x, y, z
